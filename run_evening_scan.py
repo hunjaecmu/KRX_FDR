@@ -23,7 +23,7 @@ def run_once():
     print("=" * 70)
 
     try:
-        results = scan_all_breakouts()
+        results = scan_all_breakouts()  # 필요하면 scan_all_breakouts(max_workers=8)
 
         print_scan_results(results)
 
@@ -77,8 +77,5 @@ def run_daily_scheduler():
 
 
 if __name__ == "__main__":
-    # 즉시 1회 실행
     run_once()
-
-    # 매일 지정 시각 자동 실행
     # run_daily_scheduler()

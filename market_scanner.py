@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Optional
 
 import pandas as pd
@@ -34,6 +35,8 @@ SCAN_CASES = {
         "label": "월봉 120이평 돌파",
     },
 }
+
+DEFAULT_MAX_WORKERS = max(1, (os.cpu_count() or 2) - 1)
 
 
 def _load_by_timeframe(code: str, timeframe: str) -> pd.DataFrame:
@@ -82,29 +85,31 @@ def detect_breakout_up(df: pd.DataFrame, ma_col: str) -> Optional[dict]:
         "prev_close": prev_close,
         "prev_ma_value": prev_ma,
         "breakout_strength": strength,
+        "breakout_pct": strength * 100 if strength is not None else None,
         "is_final": curr_row["is_final"] if "is_final" in curr_row.index else None,
     }
 
 
-def scan_one_case(case_key: str, timeframe: str, ma_col: str, label: str) -> list[dict]:
-    master = load_master()
-    rows: list[dict] = []
+def _scan_one_stock(row_data: tuple[str, str]) -> list[dict]:
+    """
+    종목 1개에 대해 모든 케이스를 검사해서 결과 row list 반환
+    멀티프로세싱용 top-level 함수
+    """
+    code, name = row_data
+    out: list[dict] = []
 
-    for row in master.itertuples(index=False):
-        code = str(row.code).zfill(6)
-        name = str(row.name)
-
+    for case_key, meta in SCAN_CASES.items():
         try:
-            df = _load_by_timeframe(code, timeframe)
-            info = detect_breakout_up(df, ma_col)
+            df = _load_by_timeframe(code, meta["timeframe"])
+            info = detect_breakout_up(df, meta["ma_col"])
             if info is None:
                 continue
 
-            rows.append({
+            out.append({
                 "scan_case": case_key,
-                "scan_label": label,
-                "timeframe": timeframe,
-                "ma_col": ma_col,
+                "scan_label": meta["label"],
+                "timeframe": meta["timeframe"],
+                "ma_col": meta["ma_col"],
                 "code": code,
                 "name": name,
                 "date": pd.to_datetime(info["date"]).strftime("%Y-%m-%d"),
@@ -113,32 +118,72 @@ def scan_one_case(case_key: str, timeframe: str, ma_col: str, label: str) -> lis
                 "prev_close": info["prev_close"],
                 "prev_ma_value": info["prev_ma_value"],
                 "breakout_strength": info["breakout_strength"],
-                "breakout_pct": info["breakout_strength"] * 100 if info["breakout_strength"] is not None else None,
+                "breakout_pct": info["breakout_pct"],
                 "is_final": info["is_final"],
             })
-
-        except Exception as e:
-            print(f"[SCAN][WARN] {timeframe} {code} {name}: {e}")
+        except Exception:
             continue
 
-    rows.sort(
-        key=lambda x: (-999999 if x["breakout_strength"] is None else -x["breakout_strength"], x["code"])
-    )
-    return rows
+    return out
 
 
-def scan_all_breakouts() -> dict[str, list[dict]]:
-    results: dict[str, list[dict]] = {}
+def scan_all_breakouts_parallel(max_workers: Optional[int] = None) -> dict[str, list[dict]]:
+    """
+    멀티프로세싱 버전
+    """
+    master = load_master()
 
-    for case_key, meta in SCAN_CASES.items():
-        results[case_key] = scan_one_case(
-            case_key=case_key,
-            timeframe=meta["timeframe"],
-            ma_col=meta["ma_col"],
-            label=meta["label"],
+    if max_workers is None:
+        max_workers = DEFAULT_MAX_WORKERS
+
+    tasks = []
+    for row in master.itertuples(index=False):
+        code = str(row.code).zfill(6)
+        name = str(row.name)
+        tasks.append((code, name))
+
+    results: dict[str, list[dict]] = {case_key: [] for case_key in SCAN_CASES.keys()}
+
+    print(f"[SCAN] 멀티프로세싱 시작 | 종목 수={len(tasks)} | workers={max_workers}")
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {executor.submit(_scan_one_stock, task): task for task in tasks}
+
+        done_count = 0
+        total_count = len(future_map)
+
+        for future in as_completed(future_map):
+            code, name = future_map[future]
+            done_count += 1
+
+            try:
+                rows = future.result()
+                for row in rows:
+                    results[row["scan_case"]].append(row)
+            except Exception as e:
+                print(f"[SCAN][WARN] worker 실패: {code} {name} / {e}")
+
+            if done_count % 100 == 0 or done_count == total_count:
+                print(f"[SCAN] 진행률: {done_count}/{total_count}")
+
+    # 돌파강도 낮은 것부터 높은 것 순서로 정렬
+    for case_key in results.keys():
+        results[case_key].sort(
+            key=lambda x: (
+                999999 if x["breakout_strength"] is None else x["breakout_strength"],
+                x["code"],
+            )
         )
 
     return results
+
+
+def scan_all_breakouts(max_workers: Optional[int] = None) -> dict[str, list[dict]]:
+    """
+    기존 인터페이스 유지용.
+    내부적으로 멀티프로세싱 실행.
+    """
+    return scan_all_breakouts_parallel(max_workers=max_workers)
 
 
 def print_scan_results(results: dict[str, list[dict]]) -> None:
@@ -203,9 +248,10 @@ def save_scan_results_to_csv(
                 "breakout_strength", "breakout_pct", "is_final",
             ])
         else:
+            # 돌파강도 낮은 순 정렬
             df_case = df_case.sort_values(
                 by=["breakout_strength", "code"],
-                ascending=[False, True]
+                ascending=[True, True]
             ).reset_index(drop=True)
 
         df_case.to_csv(case_file, index=False, encoding="utf-8-sig")
@@ -219,9 +265,10 @@ def save_scan_results_to_csv(
 
     df_all = pd.DataFrame(all_rows)
     if not df_all.empty:
+        # 전체 파일도 돌파강도 낮은 순 정렬
         df_all = df_all.sort_values(
             by=["scan_case", "breakout_strength", "code"],
-            ascending=[True, False, True]
+            ascending=[True, True, True]
         ).reset_index(drop=True)
 
     df_summary = pd.DataFrame(summary_rows)

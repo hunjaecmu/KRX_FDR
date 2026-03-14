@@ -7,14 +7,12 @@ from typing import Optional, Dict, List
 
 import pandas as pd
 import FinanceDataReader as fdr
-
+from config import DATA_DIR
 
 # =========================================================
 # 설정
 # =========================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DATA_DIR = os.path.join(BASE_DIR, "data")
 MASTER_DIR = os.path.join(DATA_DIR, "master")
 RAW_DAILY_DIR = os.path.join(DATA_DIR, "raw", "daily")
 DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
@@ -30,6 +28,10 @@ SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
 
 MA_WINDOWS = [5, 10, 20, 120, 240]
+
+# 장중/종가 판정 기준 (필요하면 조정)
+MARKET_CLOSE_HOUR = 15
+MARKET_CLOSE_MINUTE = 30
 
 
 # =========================================================
@@ -102,6 +104,36 @@ def clean_numeric(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     result = df.copy()
     for c in cols:
         result[c] = pd.to_numeric(result[c], errors="coerce")
+    return result
+
+def get_run_metadata(now: Optional[datetime] = None) -> Dict[str, str]:
+    if now is None:
+        now = datetime.now()
+
+    asof_datetime = now.strftime("%Y-%m-%d %H:%M:%S")
+    asof_date = now.strftime("%Y-%m-%d")
+    asof_time = now.strftime("%H:%M")
+
+    is_weekday = now.weekday() < 5
+    before_close = (now.hour, now.minute) < (MARKET_CLOSE_HOUR, MARKET_CLOSE_MINUTE)
+
+    if is_weekday and before_close:
+        price_status = "장중"
+    else:
+        price_status = "종가"
+
+    return {
+        "asof_datetime": asof_datetime,
+        "asof_date": asof_date,
+        "asof_time": asof_time,
+        "price_status": price_status,
+    }
+
+
+def attach_run_metadata(df: pd.DataFrame, metadata: Dict[str, str]) -> pd.DataFrame:
+    result = df.copy()
+    for key, value in metadata.items():
+        result[key] = value
     return result
 
 
@@ -237,13 +269,19 @@ def clean_fdr_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-def fetch_ohlcv_with_retry(code: str, start_date: str, end_date: str) -> pd.DataFrame:
+def fetch_ohlcv_with_retry(
+    code: str,
+    start_date: str,
+    end_date: str,
+    metadata: Dict[str, str],
+) -> pd.DataFrame:
     last_error = None
 
     for attempt in range(1, MAX_RETRY + 1):
         try:
             df = fdr.DataReader(code, start_date, end_date)
-            return clean_fdr_ohlcv(df)
+            cleaned = clean_fdr_ohlcv(df)
+            return attach_run_metadata(cleaned, metadata)
         except Exception as e:
             last_error = e
             print(f"[RETRY {attempt}/{MAX_RETRY}] {code} 조회 실패: {e}")
@@ -252,26 +290,25 @@ def fetch_ohlcv_with_retry(code: str, start_date: str, end_date: str) -> pd.Data
     raise last_error
 
 
-def load_raw_daily(file_path: str) -> pd.DataFrame:
-    if not os.path.exists(file_path):
-        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+def fetch_ohlcv_with_retry(
+    code: str,
+    start_date: str,
+    end_date: str,
+    metadata: Dict[str, str],
+) -> pd.DataFrame:
+    last_error = None
 
-    df = pd.read_csv(file_path)
-    if df.empty:
-        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+    for attempt in range(1, MAX_RETRY + 1):
+        try:
+            df = fdr.DataReader(code, start_date, end_date)
+            cleaned = clean_fdr_ohlcv(df)
+            return attach_run_metadata(cleaned, metadata)
+        except Exception as e:
+            last_error = e
+            print(f"[RETRY {attempt}/{MAX_RETRY}] {code} 조회 실패: {e}")
+            time.sleep(1.2 * attempt)
 
-    expected = ["date", "open", "high", "low", "close", "volume"]
-    for col in expected:
-        if col not in df.columns:
-            df[col] = pd.NA
-
-    df = df[expected].copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
-    df = clean_numeric(df, ["open", "high", "low", "close", "volume"])
-    df["volume"] = df["volume"].fillna(0)
-    df = df.dropna(subset=["date"]).sort_values("date").drop_duplicates(subset=["date"], keep="last")
-    return df.reset_index(drop=True)
-
+    raise last_error
 
 def get_existing_last_date(file_path: str) -> Optional[str]:
     if not os.path.exists(file_path):
@@ -304,10 +341,40 @@ def save_raw_daily(file_path: str, df: pd.DataFrame) -> None:
     out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
     out.to_csv(file_path, index=False, encoding="utf-8-sig")
 
+def load_raw_daily(file_path: str) -> pd.DataFrame:
+    expected = [
+        "date", "open", "high", "low", "close", "volume",
+        "asof_datetime", "asof_date", "asof_time", "price_status",
+    ]
+
+    if not os.path.exists(file_path):
+        return pd.DataFrame(columns=expected)
+
+    df = pd.read_csv(file_path)
+    if df.empty:
+        return pd.DataFrame(columns=expected)
+
+    for col in expected:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    df = df[expected].copy()
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    df = clean_numeric(df, ["open", "high", "low", "close", "volume"])
+    df["volume"] = df["volume"].fillna(0)
+
+    df = (
+        df.dropna(subset=["date"])
+          .sort_values("date")
+          .drop_duplicates(subset=["date"], keep="last")
+          .reset_index(drop=True)
+    )
+    return df
 
 def update_one_raw_stock(code: str, name: str) -> Dict:
     file_path = raw_file_path(code, name)
     end_date = today_str("%Y-%m-%d")
+    run_meta = get_run_metadata()
 
     force_full_refresh = raw_schema_needs_refresh(file_path)
     if force_full_refresh:
@@ -327,7 +394,7 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
         return {"status": "skip", "rows": 0, "updated": False}
 
     try:
-        new_df = fetch_ohlcv_with_retry(code, start_date, end_date)
+        new_df = fetch_ohlcv_with_retry(code, start_date, end_date, metadata=run_meta)
 
         if force_full_refresh:
             merged = new_df.copy()
@@ -338,7 +405,11 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
                 return {"status": "empty", "rows": 0, "updated": False}
 
             merged = pd.concat([old_df, new_df], ignore_index=True)
-            merged = merged.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
+            merged = (
+                merged.sort_values("date")
+                      .drop_duplicates(subset=["date"], keep="last")
+                      .reset_index(drop=True)
+            )
 
         if merged.empty:
             print(f"[RAW][{mode}] {code} {name} 저장할 데이터 없음")
@@ -353,21 +424,26 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
     except Exception as e:
         print(f"[RAW][FAIL] {code} {name}: {e}")
         return {"status": "fail", "rows": 0, "updated": False, "reason": str(e)}
-
-
+        
 # =========================================================
 # 파생 데이터(일/주/월)
 # =========================================================
+
 def build_daily_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
+    cols = [
+        "date", "open", "high", "low", "close", "volume",
+        "ma5", "ma10", "ma20", "ma120", "ma240",
+        "is_final",
+        "asof_datetime", "asof_date", "asof_time", "price_status",
+    ]
+
     if raw_df.empty:
-        cols = ["date", "open", "high", "low", "close", "volume"] + [f"ma{w}" for w in MA_WINDOWS] + ["is_final"]
         return pd.DataFrame(columns=cols)
 
     df = raw_df.copy().sort_values("date").reset_index(drop=True)
     df = add_ma_columns(df, close_col="close")
     df["is_final"] = True
-    return df
-
+    return df[cols]
 
 def _period_end_friday(ts: pd.Timestamp) -> pd.Timestamp:
     days_to_friday = 4 - ts.weekday()
@@ -379,7 +455,12 @@ def _period_end_month(ts: pd.Timestamp) -> pd.Timestamp:
 
 
 def build_weekly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
-    cols = ["date", "open", "high", "low", "close", "volume"] + [f"ma{w}" for w in MA_WINDOWS] + ["is_final"]
+    cols = [
+        "date", "open", "high", "low", "close", "volume",
+        "ma5", "ma10", "ma20", "ma120", "ma240",
+        "is_final",
+        "asof_datetime", "asof_date", "asof_time", "price_status",
+    ]
     if raw_df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -396,6 +477,10 @@ def build_weekly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
             close=("close", "last"),
             volume=("volume", "sum"),
             last_trade_date=("date", "max"),
+            asof_datetime=("asof_datetime", "last"),
+            asof_date=("asof_date", "last"),
+            asof_time=("asof_time", "last"),
+            price_status=("price_status", "last"),
         )
         .rename(columns={"week_end": "date"})
         .sort_values("date")
@@ -416,7 +501,12 @@ def build_weekly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_monthly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
-    cols = ["date", "open", "high", "low", "close", "volume"] + [f"ma{w}" for w in MA_WINDOWS] + ["is_final"]
+    cols = [
+        "date", "open", "high", "low", "close", "volume",
+        "ma5", "ma10", "ma20", "ma120", "ma240",
+        "is_final",
+        "asof_datetime", "asof_date", "asof_time", "price_status",
+    ]
     if raw_df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -433,6 +523,10 @@ def build_monthly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
             close=("close", "last"),
             volume=("volume", "sum"),
             last_trade_date=("date", "max"),
+            asof_datetime=("asof_datetime", "last"),
+            asof_date=("asof_date", "last"),
+            asof_time=("asof_time", "last"),
+            price_status=("price_status", "last"),
         )
         .rename(columns={"month_end": "date"})
         .sort_values("date")
@@ -450,7 +544,6 @@ def build_monthly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     monthly = monthly.drop(columns=["last_trade_date"])
     return monthly[cols]
-
 
 def save_derived_file(file_path: str, df: pd.DataFrame) -> None:
     out = df.copy()

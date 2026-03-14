@@ -2,16 +2,22 @@
 
 import os
 import pandas as pd
+from config import DATA_DIR
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-DATA_DIR = os.path.join(BASE_DIR, "data")
 MASTER_FILE = os.path.join(DATA_DIR, "master", "kospi_tickers.csv")
 
 RAW_DAILY_DIR = os.path.join(DATA_DIR, "raw", "daily")
 DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
 DERIVED_WEEKLY_DIR = os.path.join(DATA_DIR, "derived", "weekly")
 DERIVED_MONTHLY_DIR = os.path.join(DATA_DIR, "derived", "monthly")
+
+
+def get_weekly_file_path(code: str):
+    return _find_file(DERIVED_WEEKLY_DIR, code)
+
+
+def get_monthly_file_path(code: str):
+    return _find_file(DERIVED_MONTHLY_DIR, code)
 
 
 def load_master() -> pd.DataFrame:
