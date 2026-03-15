@@ -50,10 +50,10 @@ CASE_META = {
         "ma_cols": ["ma10"],
         "lookback": CHART_LOOKBACK_MONTHLY,
     },
-    "monthly_ma120_breakout": {
-        "label": "월봉 120이평 돌파",
+    "monthly_ma240_breakout": {
+        "label": "월봉 240이평 돌파",
         "timeframe": "monthly",
-        "ma_cols": ["ma120"],
+        "ma_cols": ["ma240"],
         "lookback": CHART_LOOKBACK_MONTHLY,
     },
 }
@@ -201,7 +201,7 @@ def _make_title(
         "weekly_ma10_breakout": "10MA 돌파",
         "weekly_ma240_breakout": "240MA 돌파",
         "monthly_ma10_breakout": "10MA 돌파",
-        "monthly_ma120_breakout": "120MA 돌파",
+        "monthly_ma240_breakout": "240MA 돌파",
     }
     breakout_label = breakout_map.get(title_suffix, "")
 

@@ -29,10 +29,10 @@ SCAN_CASES = {
         "ma_col": "ma10",
         "label": "월봉 10이평 돌파",
     },
-    "monthly_ma120_breakout": {
+    "monthly_ma240_breakout": {
         "timeframe": "monthly",
-        "ma_col": "ma120",
-        "label": "월봉 120이평 돌파",
+        "ma_col": "ma240",
+        "label": "월봉 240이평 돌파",
     },
 }
 
@@ -222,7 +222,7 @@ def save_scan_results_to_csv(
         - weekly_ma10_breakout.csv
         - weekly_ma240_breakout.csv
         - monthly_ma10_breakout.csv
-        - monthly_ma120_breakout.csv
+                - monthly_ma240_breakout.csv
     """
     if output_root is None:
         output_root = OUTPUT_DIR
