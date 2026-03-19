@@ -12,6 +12,7 @@ from market_scanner import (
     save_scan_results_to_csv,
 )
 from chart_viewer import show_breakout_charts
+from position_tracker import run_position_tracking
 
 
 def run_once():
@@ -29,6 +30,21 @@ def run_once():
 
         save_folder = save_scan_results_to_csv(results, timestamp=timestamp)
         print(f"\nCSV 저장 완료: {save_folder}")
+
+        tracking_result = run_position_tracking()
+        if tracking_result.get("status") == "ok":
+            print(
+                "[TRACKING] 저장 완료 | "
+                f"rows={tracking_result.get('rows')} | "
+                f"snapshot={tracking_result.get('snapshot_file')} | "
+                f"history={tracking_result.get('history_file')}"
+            )
+        else:
+            print(
+                "[TRACKING][WARN] 생성 생략 | "
+                f"status={tracking_result.get('status')} | "
+                f"message={tracking_result.get('message')}"
+            )
 
         show_breakout_charts(results, save_root=save_folder)
 

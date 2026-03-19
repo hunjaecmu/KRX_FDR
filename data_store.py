@@ -142,7 +142,7 @@ def attach_run_metadata(df: pd.DataFrame, metadata: Dict[str, str]) -> pd.DataFr
 # =========================================================
 def normalize_fdr_listing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    FDR StockListing('KOSPI') 결과를 표준화.
+    FDR StockListing 결과를 표준화.
     기대 컬럼: Code, Name, Market
     """
     if df is None or df.empty:
@@ -178,8 +178,52 @@ def normalize_fdr_listing(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
+def _fetch_listing_with_retry(market_name: str) -> pd.DataFrame:
+    last_error = None
+
+    for attempt in range(1, MAX_RETRY + 1):
+        try:
+            listing = fdr.StockListing(market_name)
+            normalized = normalize_fdr_listing(listing)
+
+            if not normalized.empty:
+                return normalized
+
+            print(f"[MASTER][WARN] {market_name} 빈 종목 목록 반환 (attempt={attempt})")
+
+        except Exception as e:
+            last_error = e
+            print(f"[MASTER][WARN] {market_name} 조회 실패 (attempt={attempt}): {e}")
+
+        time.sleep(1.0 * attempt)
+
+    raise RuntimeError(f"{market_name} 종목 목록 조회 실패: {last_error}")
+
+
+def _needs_krx_refresh(master_file: str) -> bool:
+    if not os.path.exists(master_file):
+        return True
+
+    try:
+        df = pd.read_csv(master_file, nrows=5000)
+    except Exception:
+        return True
+
+    if df.empty:
+        return True
+    if "market" not in df.columns:
+        return True
+
+    market_values = set(df["market"].astype(str).str.upper().str.strip().unique())
+    return "KOSDAQ" not in market_values
+
+
 def update_master(force: bool = False) -> pd.DataFrame:
-    should_update = force or (not os.path.exists(MASTER_FILE)) or is_last_day_of_month()
+    should_update = (
+        force
+        or _needs_krx_refresh(MASTER_FILE)
+        or is_last_day_of_month()
+    )
 
     if not should_update:
         print("[MASTER] 종목 목록 갱신 생략")
@@ -187,28 +231,32 @@ def update_master(force: bool = False) -> pd.DataFrame:
         master_df["code"] = master_df["code"].astype(str).str.zfill(6)
         return master_df
 
-    print("[MASTER] KOSPI 종목 목록 갱신 시작")
+    print("[MASTER] KRX(KOSPI+KOSDAQ) 종목 목록 갱신 시작")
 
-    last_error = None
-    master_df = None
+    try:
+        kospi_df = _fetch_listing_with_retry("KOSPI")
+        time.sleep(SLEEP_SEC_BETWEEN_MASTER_CALLS)
+        kosdaq_df = _fetch_listing_with_retry("KOSDAQ")
 
-    for attempt in range(1, MAX_RETRY + 1):
-        try:
-            listing = fdr.StockListing("KOSPI")
-            master_df = normalize_fdr_listing(listing)
+        master_df = (
+            pd.concat([kospi_df, kosdaq_df], ignore_index=True)
+            .sort_values("code")
+            .drop_duplicates(subset=["code"], keep="first")
+            .reset_index(drop=True)
+        )
 
-            if not master_df.empty:
-                master_df.to_csv(MASTER_FILE, index=False, encoding="utf-8-sig")
-                print(f"[MASTER] 저장 완료: {MASTER_FILE} / {len(master_df)}개")
-                return master_df
+        if master_df.empty:
+            raise RuntimeError("KOSPI+KOSDAQ 병합 결과가 비어 있습니다.")
 
-            print(f"[MASTER][WARN] 빈 종목 목록 반환 (attempt={attempt})")
+        master_df.to_csv(MASTER_FILE, index=False, encoding="utf-8-sig")
+        print(
+            f"[MASTER] 저장 완료: {MASTER_FILE} / total={len(master_df)} "
+            f"(KOSPI={len(kospi_df)}, KOSDAQ={len(kosdaq_df)})"
+        )
+        return master_df
 
-        except Exception as e:
-            last_error = e
-            print(f"[MASTER][WARN] 종목 목록 조회 실패 (attempt={attempt}): {e}")
-
-        time.sleep(1.0 * attempt)
+    except Exception as e:
+        print(f"[MASTER][WARN] KRX 종목 목록 조회 실패: {e}")
 
     if os.path.exists(MASTER_FILE):
         print("[MASTER][FALLBACK] 기존 master 파일 사용")
@@ -216,7 +264,7 @@ def update_master(force: bool = False) -> pd.DataFrame:
         old_df["code"] = old_df["code"].astype(str).str.zfill(6)
         return old_df
 
-    raise RuntimeError(f"KOSPI 종목 목록을 가져오지 못했습니다. last_error={last_error}")
+    raise RuntimeError("KRX(KOSPI+KOSDAQ) 종목 목록을 가져오지 못했습니다.")
 
 
 # =========================================================
@@ -593,7 +641,7 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
     ensure_dirs()
 
     print("======================================")
-    print("KOSPI 수집 시작 (FinanceDataReader)")
+    print("KRX(KOSPI+KOSDAQ) 수집 시작 (FinanceDataReader)")
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("======================================")
 
