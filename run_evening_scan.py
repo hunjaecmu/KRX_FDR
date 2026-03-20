@@ -11,7 +11,11 @@ from market_scanner import (
     print_scan_results,
     save_scan_results_to_csv,
 )
-from chart_viewer import show_breakout_charts
+from chart_viewer import (
+    show_breakout_charts,
+    create_overview_image,
+    create_scan_overview_html,
+)
 from position_tracker import run_position_tracking
 
 
@@ -24,12 +28,24 @@ def run_once():
     print("=" * 70)
 
     try:
+        html_sort_by = "strength"  # "strength" or "code"
+
         results = scan_all_breakouts()  # 필요하면 scan_all_breakouts(max_workers=8)
 
         print_scan_results(results)
 
         save_folder = save_scan_results_to_csv(results, timestamp=timestamp)
         print(f"\nCSV 저장 완료: {save_folder}")
+
+        overview_path = create_overview_image(
+            results,
+            save_root=save_folder,
+            min_pct=0.5,
+            max_pct=5.0,
+            show_first_page=False,
+            pause_sec=0.0,
+        )
+        print(f"Overview 저장 완료: {overview_path}")
 
         tracking_result = run_position_tracking()
         if tracking_result.get("status") == "ok":
@@ -47,6 +63,14 @@ def run_once():
             )
 
         show_breakout_charts(results, save_root=save_folder)
+
+        html_path = create_scan_overview_html(
+            results,
+            save_root=save_folder,
+            timestamp=timestamp,
+            sort_by=html_sort_by,
+        )
+        print(f"HTML 저장 완료: {html_path}")
 
     except Exception as e:
         print(f"[RUN][FAIL] 스캔 실행 중 오류 발생: {e}")

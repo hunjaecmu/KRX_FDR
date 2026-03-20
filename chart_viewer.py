@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+from html import escape
 from typing import Optional
 
 import pandas as pd
-import mplfinance as mpf
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 from matplotlib import font_manager
 
 from config import (
@@ -20,6 +19,13 @@ from config import (
     SAVE_CHART,
 )
 from data_loader import load_weekly, load_monthly
+
+# batch 모드에서는 GUI 백엔드를 쓰지 않아 tkinter 종료 오류를 방지한다.
+if not SHOW_CHART:
+    mpl.use("Agg")
+
+import matplotlib.pyplot as plt
+import mplfinance as mpf
 
 
 _FONT_CONFIGURED = False
@@ -606,3 +612,376 @@ def show_breakout_charts(results: dict, save_root: Optional[str] = None):
                 breakout_strength=item.get("breakout_strength"),
                 is_final=item.get("is_final"),
             )
+
+
+def create_scan_overview_html(
+    results: dict[str, list[dict]],
+    save_root: str,
+    html_filename: Optional[str] = None,
+    timestamp: Optional[str] = None,
+    sort_by: str = "strength",
+) -> str:
+    """
+    scan_result 폴더 내 차트 PNG와 overview.png를 한 번에 확인할 수 있는 HTML 생성.
+    """
+    _ensure_dir(save_root)
+
+    if html_filename is None:
+        if timestamp:
+            html_filename = f"scan_overview_{timestamp}.html"
+        else:
+            html_filename = "scan_overview.html"
+
+    html_path = os.path.join(save_root, html_filename)
+    sort_key = "strength" if sort_by not in {"strength", "code"} else sort_by
+
+    filtered = _filter_results_by_breakout_pct(results, min_pct=0.5, max_pct=5.0)
+
+    sections = []
+    for case_key, meta in CASE_META.items():
+        case_dir = os.path.join(save_root, "charts", case_key)
+        image_tags = []
+
+        items = list(results.get(case_key, []))
+        if sort_key == "code":
+            items.sort(key=lambda x: str(x.get("code", "")))
+        else:
+            items.sort(
+                key=lambda x: (
+                    999999 if x.get("breakout_strength") is None else float(x.get("breakout_strength")),
+                    str(x.get("code", "")),
+                )
+            )
+
+        for idx, item in enumerate(items):
+            image_path = _make_save_path(
+                code=item["code"],
+                name=item["name"],
+                timeframe=meta["timeframe"],
+                title_suffix=case_key,
+                save_dir=case_dir,
+            )
+            if not os.path.exists(image_path):
+                continue
+
+            rel_path = os.path.relpath(image_path, save_root).replace("\\", "/")
+            caption = f"{item['code']} {item['name']}"
+            image_tags.append(
+                "<figure class=\"card\">"
+                f"<img class=\"zoomable\" src=\"{escape(rel_path)}\" loading=\"lazy\" alt=\"{escape(caption)}\" data-caption=\"{escape(caption)}\" data-group=\"{escape(case_key)}\" data-index=\"{idx}\">"
+                f"<figcaption>{escape(caption)}</figcaption>"
+                "</figure>"
+            )
+
+        if not image_tags and os.path.isdir(case_dir):
+            for idx, filename in enumerate(sorted(os.listdir(case_dir))):
+                if not filename.lower().endswith(".png"):
+                    continue
+
+                image_path = os.path.join(case_dir, filename)
+                rel_path = os.path.relpath(image_path, save_root).replace("\\", "/")
+                image_tags.append(
+                    "<figure class=\"card\">"
+                    f"<img class=\"zoomable\" src=\"{escape(rel_path)}\" loading=\"lazy\" alt=\"{escape(filename)}\" data-caption=\"{escape(filename)}\" data-group=\"{escape(case_key)}\" data-index=\"{idx}\">"
+                    f"<figcaption>{escape(filename)}</figcaption>"
+                    "</figure>"
+                )
+
+        section_html = (
+            f"<section id=\"section-{escape(case_key)}\"><h2>{escape(meta['label'])} ({len(image_tags)}개)</h2>"
+            f"<div class=\"grid\">{''.join(image_tags) if image_tags else '<p class=\"empty\">저장된 차트가 없습니다.</p>'}</div>"
+            "</section>"
+        )
+        sections.append(section_html)
+
+    overview_table_rows = []
+    total_all = 0
+    total_filtered = 0
+    for case_key, meta in CASE_META.items():
+        total_count = len(results.get(case_key, []))
+        filtered_count = len(filtered.get(case_key, []))
+        total_all += total_count
+        total_filtered += filtered_count
+        label_link = f"<a href=\"#section-{escape(case_key)}\">{escape(meta['label'])}</a>"
+        overview_table_rows.append(
+            "<tr>"
+            f"<td>{label_link}</td>"
+            f"<td>{total_count}</td>"
+            f"<td>{filtered_count}</td>"
+            "</tr>"
+        )
+
+    overview_table_block = (
+        "<section>"
+        "<h2>Overview Table</h2>"
+        "<div class=\"table-wrap\">"
+        "<table class=\"summary\">"
+        "<thead><tr><th>구분</th><th>전체 돌파 종목수</th><th>0.5%~5.0% 종목수</th></tr></thead>"
+        f"<tbody>{''.join(overview_table_rows)}</tbody>"
+        f"<tfoot><tr><td>합계</td><td>{total_all}</td><td>{total_filtered}</td></tr></tfoot>"
+        "</table>"
+        "</div>"
+        "</section>"
+    )
+
+    html = f"""<!doctype html>
+<html lang=\"ko\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>스캔 결과 뷰어</title>
+    <style>
+        :root {{
+            --bg: #f6f8fb;
+            --surface: #ffffff;
+            --text: #18212f;
+            --muted: #5f6b7a;
+            --line: #dde4ed;
+            --brand: #0f6bff;
+        }}
+        * {{ box-sizing: border-box; }}
+        body {{
+            margin: 0;
+            font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+            color: var(--text);
+            background: radial-gradient(circle at top left, #eef3ff 0%, var(--bg) 45%);
+        }}
+        .wrap {{ max-width: 1440px; margin: 0 auto; padding: 24px; }}
+        h1 {{ margin: 0 0 6px; font-size: 28px; }}
+        .desc {{ margin: 0 0 24px; color: var(--muted); }}
+        section {{
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 18px;
+            box-shadow: 0 10px 24px rgba(16, 31, 64, 0.05);
+        }}
+        h2 {{ margin: 0 0 12px; font-size: 20px; color: #0b4ea2; }}
+        .overview img {{ width: 100%; max-width: 1200px; border-radius: 10px; border: 1px solid var(--line); }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }}
+        .table-wrap {{ overflow-x: auto; }}
+        table.summary {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+        table.summary th, table.summary td {{ border: 1px solid var(--line); padding: 8px 10px; text-align: center; }}
+        table.summary th {{ background: #eef4ff; color: #103f86; }}
+        table.summary tbody tr:nth-child(odd) {{ background: #fafcff; }}
+        table.summary tfoot td {{ background: #f1f6ff; font-weight: 700; }}
+        table.summary a {{ color: #0f59d1; text-decoration: none; font-weight: 600; }}
+        table.summary a:hover {{ text-decoration: underline; }}
+        .card {{ margin: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #fff; }}
+        .card img {{ width: 100%; display: block; }}
+        .zoomable {{ cursor: zoom-in; }}
+        .card figcaption {{ padding: 8px 10px; font-size: 13px; color: var(--muted); }}
+        .empty {{ color: var(--muted); margin: 0; }}
+        .lightbox {{
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(8, 15, 26, 0.84);
+            z-index: 9999;
+            padding: 24px;
+        }}
+        .lightbox.open {{ display: flex; }}
+        .lightbox img {{
+            max-width: min(95vw, 1800px);
+            max-height: 86vh;
+            width: auto;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+            background: #fff;
+        }}
+        .lightbox-caption {{
+            position: absolute;
+            left: 50%;
+            bottom: 18px;
+            transform: translateX(-50%);
+            color: #e8edf5;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        }}
+        .lightbox-close {{
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            border: 0;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            width: 36px;
+            height: 36px;
+            border-radius: 999px;
+            font-size: 22px;
+            line-height: 1;
+            cursor: pointer;
+        }}
+        .lightbox-nav {{
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 0;
+            background: rgba(255, 255, 255, 0.22);
+            color: #fff;
+            width: 44px;
+            height: 64px;
+            border-radius: 12px;
+            font-size: 28px;
+            line-height: 1;
+            cursor: pointer;
+        }}
+        .lightbox-nav:disabled {{
+            opacity: 0.35;
+            cursor: not-allowed;
+        }}
+        .lightbox-prev {{ left: 18px; }}
+        .lightbox-next {{ right: 18px; }}
+        @media (max-width: 768px) {{
+            .wrap {{ padding: 14px; }}
+            .grid {{ grid-template-columns: 1fr; }}
+            h1 {{ font-size: 24px; }}
+            .lightbox-nav {{ width: 38px; height: 54px; font-size: 22px; }}
+        }}
+    </style>
+</head>
+<body>
+    <main class=\"wrap\">
+        <h1>스캔 결과 이미지 모음</h1>
+        <p class=\"desc\">이동평균 케이스별 저장 차트를 한 화면에서 확인합니다. 정렬 기준: {escape(sort_key)}</p>
+        {overview_table_block}
+        {''.join(sections)}
+    </main>
+    <div class=\"lightbox\" id=\"lightbox\" aria-hidden=\"true\">
+        <button class=\"lightbox-nav lightbox-prev\" id=\"lightbox-prev\" type=\"button\" aria-label=\"이전 차트\" disabled>‹</button>
+        <button class=\"lightbox-nav lightbox-next\" id=\"lightbox-next\" type=\"button\" aria-label=\"다음 차트\" disabled>›</button>
+        <button class=\"lightbox-close\" id=\"lightbox-close\" type=\"button\" aria-label=\"닫기\">×</button>
+        <img id=\"lightbox-image\" src=\"\" alt=\"확대 이미지\">
+        <div class=\"lightbox-caption\" id=\"lightbox-caption\"></div>
+    </div>
+    <script>
+        const lightbox = document.getElementById("lightbox");
+        const lightboxImage = document.getElementById("lightbox-image");
+        const lightboxCaption = document.getElementById("lightbox-caption");
+        const lightboxClose = document.getElementById("lightbox-close");
+        const lightboxPrev = document.getElementById("lightbox-prev");
+        const lightboxNext = document.getElementById("lightbox-next");
+        const zoomableImages = Array.from(document.querySelectorAll("img.zoomable"));
+
+        let currentImage = null;
+        let currentGroupImages = [];
+        let currentGroupPos = -1;
+
+        function updateNavButtons() {{
+            const canNavigate = currentGroupImages.length > 1;
+            lightboxPrev.disabled = !canNavigate || currentGroupPos <= 0;
+            lightboxNext.disabled = !canNavigate || currentGroupPos >= currentGroupImages.length - 1;
+        }}
+
+        function updateCaption() {{
+            if (!currentImage) {{
+                lightboxCaption.textContent = "";
+                return;
+            }}
+
+            const baseCaption = currentImage.dataset.caption || currentImage.alt || "";
+            if (currentGroupImages.length > 0 && currentGroupPos >= 0) {{
+                lightboxCaption.textContent = `${{baseCaption}} (${{currentGroupPos + 1}}/${{currentGroupImages.length}})`;
+            }} else {{
+                lightboxCaption.textContent = baseCaption;
+            }}
+        }}
+
+        function openLightboxByImage(img) {{
+            if (!img) {{
+                return;
+            }}
+
+            currentImage = img;
+            lightboxImage.src = img.src;
+            lightbox.classList.add("open");
+            lightbox.setAttribute("aria-hidden", "false");
+
+            const group = img.dataset.group || "";
+            if (group) {{
+                currentGroupImages = zoomableImages.filter((node) => node.dataset.group === group);
+                currentGroupPos = currentGroupImages.indexOf(img);
+            }} else {{
+                currentGroupImages = [];
+                currentGroupPos = -1;
+            }}
+
+            updateCaption();
+            updateNavButtons();
+        }}
+
+        function moveGroup(step) {{
+            if (currentGroupImages.length <= 1 || currentGroupPos < 0) {{
+                return;
+            }}
+
+            let nextPos = currentGroupPos + step;
+            if (nextPos < 0 || nextPos >= currentGroupImages.length) {{
+                return;
+            }}
+
+            openLightboxByImage(currentGroupImages[nextPos]);
+        }}
+
+        function closeLightbox() {{
+            lightbox.classList.remove("open");
+            lightbox.setAttribute("aria-hidden", "true");
+            lightboxImage.src = "";
+            lightboxCaption.textContent = "";
+            currentImage = null;
+            currentGroupImages = [];
+            currentGroupPos = -1;
+            updateNavButtons();
+        }}
+
+        zoomableImages.forEach((img) => {{
+            img.addEventListener("click", () => {{
+                openLightboxByImage(img);
+            }});
+        }});
+
+        lightboxClose.addEventListener("click", closeLightbox);
+        lightboxPrev.addEventListener("click", (event) => {{
+            event.stopPropagation();
+            moveGroup(-1);
+        }});
+        lightboxNext.addEventListener("click", (event) => {{
+            event.stopPropagation();
+            moveGroup(1);
+        }});
+
+        lightbox.addEventListener("click", (event) => {{
+            if (event.target === lightbox) {{
+                closeLightbox();
+            }}
+        }});
+
+        document.addEventListener("keydown", (event) => {{
+            if (!lightbox.classList.contains("open")) {{
+                return;
+            }}
+            if (event.key === "Escape") {{
+                closeLightbox();
+            }}
+            if (event.key === "ArrowLeft") {{
+                moveGroup(-1);
+            }}
+            if (event.key === "ArrowRight") {{
+                moveGroup(1);
+            }}
+        }});
+    </script>
+</body>
+</html>
+"""
+
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return html_path
