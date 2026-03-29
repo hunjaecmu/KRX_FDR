@@ -355,6 +355,89 @@ def _make_title(code: str, name: str, timeframe: str, anchor_date: pd.Timestamp,
     )
 
 
+def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
+    if not axes or dates is None or len(dates) == 0:
+        return
+
+    bottom_ax = axes[-1]
+    ticks: list[float] = []
+    labels: list[str] = []
+
+    prev_year = None
+    prev_month = None
+
+    for i, dt in enumerate(pd.to_datetime(dates)):
+        year = int(dt.year)
+        month = int(dt.month)
+
+        if prev_year is None or year != prev_year:
+            ticks.append(float(i))
+            labels.append(str(year))
+        elif prev_month is None or month != prev_month:
+            ticks.append(float(i))
+            labels.append(f"{month:02d}")
+
+        prev_year = year
+        prev_month = month
+
+    last_i = float(len(dates) - 1)
+    last_label = pd.to_datetime(dates[-1]).strftime("%Y-%m-%d")
+
+    try:
+        idx = ticks.index(last_i)
+        labels[idx] = last_label
+    except ValueError:
+        ticks.append(last_i)
+        labels.append(last_label)
+
+    last_dt = pd.to_datetime(dates[-1])
+    filtered_ticks: list[float] = []
+    filtered_labels: list[str] = []
+    for t, lbl in zip(ticks, labels):
+        tick_dt = pd.to_datetime(dates[int(round(t))])
+        is_month_label = bool(re.fullmatch(r"\d{2}", str(lbl)))
+        in_last_label_month = (
+            tick_dt.year == last_dt.year and tick_dt.month == last_dt.month
+        )
+        if is_month_label and in_last_label_month:
+            continue
+        filtered_ticks.append(t)
+        filtered_labels.append(lbl)
+
+    bottom_ax.set_xticks(filtered_ticks)
+    bottom_ax.set_xticklabels(filtered_labels, fontsize=4, rotation=0, ha="left")
+    bottom_ax.tick_params(axis="x", labelrotation=0)
+
+    # Align each label's left edge to the candle's left-side tick and allow
+    # the last full-date label to extend outside the chart area if needed.
+    for label in bottom_ax.get_xticklabels():
+        label.set_ha("left")
+        label.set_rotation(0)
+        label.set_rotation_mode("anchor")
+        label.set_clip_on(False)
+
+
+def _shrink_candle_side_margins(axes, data_len: int, ratio: float = 1 / 3) -> None:
+    if not axes or data_len <= 0:
+        return
+
+    ratio = max(0.0, min(1.0, float(ratio)))
+    left_edge = 0.0
+    right_edge = float(data_len - 1)
+
+    base_ax = axes[-1]
+    cur_left, cur_right = base_ax.get_xlim()
+
+    left_pad = max(0.0, left_edge - cur_left)
+    right_pad = max(0.0, cur_right - right_edge)
+
+    new_left = left_edge - (left_pad * ratio)
+    new_right = right_edge + (right_pad * ratio)
+
+    for ax in axes:
+        ax.set_xlim(new_left, new_right)
+
+
 # =========================
 # 탐색기
 # =========================
@@ -492,9 +575,10 @@ class HistoricalChartExplorer:
             style=chart_style,
             volume=True,
             axtitle=title,
+            xrotation=0,
             figratio=(14, 8),
             figscale=1.1,
-            tight_layout=True,
+            tight_layout=False,
             update_width_config=dict(
                 candle_width=0.75,
                 candle_linewidth=0.8,
@@ -528,6 +612,10 @@ class HistoricalChartExplorer:
                 )
 
             _add_last_bar_info_box(main_ax, plot_df, timeframe=self.timeframe)
+            _shrink_candle_side_margins(axes, len(mpf_df), ratio=1 / 3)
+            _apply_custom_xaxis_labels(axes, mpf_df.index)
+
+        fig.subplots_adjust(top=0.88, bottom=0.22, left=0.07, right=0.98)
 
         info_text = (
             "←/→ : 이전/다음 1봉   "
@@ -538,10 +626,10 @@ class HistoricalChartExplorer:
         )
         fig.text(
             0.5,
-            0.94,
+            0.04,
             info_text,
             ha="center",
-            va="top",
+            va="bottom",
             fontsize=9,
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
         )

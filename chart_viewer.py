@@ -357,6 +357,66 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[s
     )
 
 
+def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
+    if not axes or dates is None or len(dates) == 0:
+        return
+
+    bottom_ax = axes[-1]
+    ticks: list[float] = []
+    labels: list[str] = []
+
+    prev_year = None
+    prev_month = None
+
+    for i, dt in enumerate(pd.to_datetime(dates)):
+        year = int(dt.year)
+        month = int(dt.month)
+
+        if prev_year is None or year != prev_year:
+            ticks.append(float(i))
+            labels.append(str(year))
+        elif prev_month is None or month != prev_month:
+            ticks.append(float(i))
+            labels.append(f"{month:02d}")
+
+        prev_year = year
+        prev_month = month
+
+    last_i = float(len(dates) - 1)
+    last_label = pd.to_datetime(dates[-1]).strftime("%Y-%m-%d")
+
+    try:
+        idx = ticks.index(last_i)
+        labels[idx] = last_label
+    except ValueError:
+        ticks.append(last_i)
+        labels.append(last_label)
+
+    last_dt = pd.to_datetime(dates[-1])
+    filtered_ticks: list[float] = []
+    filtered_labels: list[str] = []
+    for t, lbl in zip(ticks, labels):
+        tick_dt = pd.to_datetime(dates[int(round(t))])
+        is_month_label = bool(re.fullmatch(r"\d{2}", str(lbl)))
+        in_last_label_month = (
+            tick_dt.year == last_dt.year and tick_dt.month == last_dt.month
+        )
+        if is_month_label and in_last_label_month:
+            continue
+        filtered_ticks.append(t)
+        filtered_labels.append(lbl)
+
+    bottom_ax.set_xticks(filtered_ticks)
+    bottom_ax.set_xticklabels(filtered_labels, fontsize=4, rotation=0, ha="left")
+    bottom_ax.tick_params(axis="x", labelrotation=0)
+
+    for label in bottom_ax.get_xticklabels():
+        label.set_ha("left")
+        label.set_rotation(0)
+        label.set_rotation_mode("anchor")
+        label.set_clip_on(False)
+
+
 def _build_chart_figure(
     code: str,
     name: str,
@@ -421,6 +481,7 @@ def _build_chart_figure(
         style=chart_style,
         volume=True,
         axtitle=title,
+        xrotation=0,
         figratio=(14, 8),
         figscale=1.1,
         tight_layout=True,
@@ -455,6 +516,7 @@ def _build_chart_figure(
             )
 
         _add_last_bar_info_box(main_ax, plot_df, timeframe=timeframe)
+        _apply_custom_xaxis_labels(axes, mpf_df.index)
 
     return fig, axes, plot_df
 
