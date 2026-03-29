@@ -60,12 +60,27 @@ def detect_breakout_up(df: pd.DataFrame, ma_col: str) -> Optional[dict]:
     if not required.issubset(df.columns):
         return None
 
-    recent = df.dropna(subset=["close", ma_col]).copy()
-    if len(recent) < 2:
+    ordered = df.sort_values("date").reset_index(drop=True).copy()
+
+    # Exclude zero-volume bars from breakout detection.
+    if "volume" in ordered.columns:
+        ordered["volume"] = pd.to_numeric(ordered["volume"], errors="coerce").fillna(0)
+        ordered = ordered[ordered["volume"] > 0].reset_index(drop=True)
+
+    if len(ordered) < 2:
         return None
 
-    prev_row = recent.iloc[-2]
-    curr_row = recent.iloc[-1]
+    # Always treat the latest row as the current bar.
+    # If latest MA is unavailable, skip instead of using old bars.
+    if pd.isna(ordered.iloc[-1]["close"]) or pd.isna(ordered.iloc[-1][ma_col]):
+        return None
+
+    valid_prev = ordered.iloc[:-1].dropna(subset=["close", ma_col])
+    if valid_prev.empty:
+        return None
+
+    prev_row = valid_prev.iloc[-1]
+    curr_row = ordered.iloc[-1]
 
     prev_close = float(prev_row["close"])
     prev_ma = float(prev_row[ma_col])

@@ -95,8 +95,16 @@ def next_day(date_str: str) -> str:
 
 def add_ma_columns(df: pd.DataFrame, close_col: str = "close") -> pd.DataFrame:
     result = df.copy()
+
+    # Exclude zero-volume bars from MA source across all timeframes.
+    if "volume" in result.columns:
+        invalid_mask = pd.to_numeric(result["volume"], errors="coerce").fillna(0).eq(0)
+        ma_source = pd.to_numeric(result[close_col], errors="coerce").mask(invalid_mask)
+    else:
+        ma_source = pd.to_numeric(result[close_col], errors="coerce")
+
     for w in MA_WINDOWS:
-        result[f"ma{w}"] = result[close_col].rolling(window=w, min_periods=w).mean()
+        result[f"ma{w}"] = ma_source.rolling(window=w, min_periods=w).mean()
     return result
 
 
@@ -104,6 +112,27 @@ def clean_numeric(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     result = df.copy()
     for c in cols:
         result[c] = pd.to_numeric(result[c], errors="coerce")
+    return result
+
+
+def normalize_zero_volume_ohlc(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    volume=0 봉의 O/H/L/C를 마지막 거래량>0 시점의 close로 통일.
+    """
+    result = df.copy()
+    required = {"open", "high", "low", "close", "volume"}
+    if not required.issubset(result.columns):
+        return result
+
+    result = clean_numeric(result, ["open", "high", "low", "close", "volume"])
+    result["volume"] = result["volume"].fillna(0)
+
+    ref_close = result["close"].where(result["volume"] > 0).ffill()
+    zero_volume_mask = result["volume"].eq(0) & ref_close.notna()
+
+    for col in ["open", "high", "low", "close"]:
+        result.loc[zero_volume_mask, col] = ref_close[zero_volume_mask]
+
     return result
 
 def get_run_metadata(now: Optional[datetime] = None) -> Dict[str, str]:
@@ -313,6 +342,7 @@ def clean_fdr_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     result = clean_numeric(result, ["open", "high", "low", "close", "volume"])
     result = result.dropna(subset=["date"]).sort_values("date").drop_duplicates(subset=["date"], keep="last")
     result["volume"] = result["volume"].fillna(0)
+    result = normalize_zero_volume_ohlc(result)
 
     return result.reset_index(drop=True)
 
@@ -410,6 +440,7 @@ def load_raw_daily(file_path: str) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"]).dt.normalize()
     df = clean_numeric(df, ["open", "high", "low", "close", "volume"])
     df["volume"] = df["volume"].fillna(0)
+    df = normalize_zero_volume_ohlc(df)
 
     df = (
         df.dropna(subset=["date"])
