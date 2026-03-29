@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Optional
@@ -29,6 +30,16 @@ SCAN_CASES = {
         "ma_col": "ma10",
         "label": "월봉 10이평 돌파",
     },
+    "monthly_ma120_breakout": {
+        "timeframe": "monthly",
+        "ma_col": "ma120",
+        "label": "월봉 120이평 돌파",
+    },
+    "monthly_ma180_breakout": {
+        "timeframe": "monthly",
+        "ma_col": "ma180",
+        "label": "월봉 180이평 돌파",
+    },
     "monthly_ma240_breakout": {
         "timeframe": "monthly",
         "ma_col": "ma240",
@@ -37,6 +48,23 @@ SCAN_CASES = {
 }
 
 DEFAULT_MAX_WORKERS = max(1, (os.cpu_count() or 2) - 1)
+
+# 스캔 대상에서 제외할 종목명 패턴 (ETF/ETN/스팩)
+EXCLUDED_NAME_PATTERNS = [
+    r"ETF",
+    r"ETN",
+    r"SPAC",
+    r"스팩",
+    r"기업인수목적",
+]
+
+
+def _is_excluded_symbol_name(name: str) -> bool:
+    text = str(name)
+    for pattern in EXCLUDED_NAME_PATTERNS:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return True
+    return False
 
 
 def _load_by_timeframe(code: str, timeframe: str) -> pd.DataFrame:
@@ -147,6 +175,17 @@ def scan_all_breakouts_parallel(max_workers: Optional[int] = None) -> dict[str, 
     멀티프로세싱 버전
     """
     master = load_master()
+
+    before_count = len(master)
+    if "name" in master.columns:
+        mask_excluded = master["name"].astype(str).apply(_is_excluded_symbol_name)
+        excluded_count = int(mask_excluded.sum())
+        master = master.loc[~mask_excluded].reset_index(drop=True)
+        if excluded_count > 0:
+            print(
+                f"[SCAN] 종목 필터 적용 | 제외={excluded_count} "
+                f"(ETF/ETN/스팩) | 대상={len(master)}/{before_count}"
+            )
 
     if max_workers is None:
         max_workers = DEFAULT_MAX_WORKERS

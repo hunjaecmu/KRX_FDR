@@ -27,7 +27,7 @@ SLEEP_SEC_BETWEEN_TICKERS = 0.12
 SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
 
-MA_WINDOWS = [5, 10, 20, 120, 240]
+MA_WINDOWS = [5, 10, 20, 120, 180, 240]
 
 # 장중/종가 판정 기준 (필요하면 조정)
 MARKET_CLOSE_HOUR = 15
@@ -511,7 +511,7 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
 def build_daily_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "date", "open", "high", "low", "close", "volume",
-        "ma5", "ma10", "ma20", "ma120", "ma240",
+        "ma5", "ma10", "ma20", "ma120", "ma180", "ma240",
         "is_final",
         "asof_datetime", "asof_date", "asof_time", "price_status",
     ]
@@ -536,7 +536,7 @@ def _period_end_month(ts: pd.Timestamp) -> pd.Timestamp:
 def build_weekly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "date", "open", "high", "low", "close", "volume",
-        "ma5", "ma10", "ma20", "ma120", "ma240",
+        "ma5", "ma10", "ma20", "ma120", "ma180", "ma240",
         "is_final",
         "asof_datetime", "asof_date", "asof_time", "price_status",
     ]
@@ -582,7 +582,7 @@ def build_weekly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
 def build_monthly_derived(raw_df: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "date", "open", "high", "low", "close", "volume",
-        "ma5", "ma10", "ma20", "ma120", "ma240",
+        "ma5", "ma10", "ma20", "ma120", "ma180", "ma240",
         "is_final",
         "asof_datetime", "asof_date", "asof_time", "price_status",
     ]

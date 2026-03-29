@@ -16,6 +16,8 @@ SCAN_CASES = [
     "weekly_ma10_breakout",
     "weekly_ma240_breakout",
     "monthly_ma10_breakout",
+    "monthly_ma120_breakout",
+    "monthly_ma180_breakout",
     "monthly_ma240_breakout",
 ]
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from html import escape
 from typing import Optional
 
@@ -31,7 +32,7 @@ import mplfinance as mpf
 _FONT_CONFIGURED = False
 _SELECTED_FONT: Optional[str] = None
 
-DEFAULT_MA_COLS = ["ma5", "ma10", "ma20", "ma120", "ma240"]
+DEFAULT_MA_COLS = ["ma5", "ma10", "ma20", "ma120", "ma180", "ma240"]
 LOOKBACK_RATIO = 2 / 3
 
 BASE_MA_WIDTH = 1.2
@@ -54,6 +55,18 @@ CASE_META = {
         "label": "월봉 10이평 돌파",
         "timeframe": "monthly",
         "ma_cols": ["ma10"],
+        "lookback": CHART_LOOKBACK_MONTHLY,
+    },
+    "monthly_ma120_breakout": {
+        "label": "월봉 120이평 돌파",
+        "timeframe": "monthly",
+        "ma_cols": ["ma120"],
+        "lookback": CHART_LOOKBACK_MONTHLY,
+    },
+    "monthly_ma180_breakout": {
+        "label": "월봉 180이평 돌파",
+        "timeframe": "monthly",
+        "ma_cols": ["ma180"],
         "lookback": CHART_LOOKBACK_MONTHLY,
     },
     "monthly_ma240_breakout": {
@@ -159,11 +172,17 @@ def _effective_lookback(lookback: int, actual_len: int) -> int:
     return min(actual_len, reduced)
 
 
-def _build_addplots(plot_df: pd.DataFrame, highlight_ma_cols: list[str]) -> list:
+def _build_addplots(
+    plot_df: pd.DataFrame,
+    highlight_ma_cols: list[str],
+    timeframe: Optional[str] = None,
+) -> list:
     addplots = []
     highlight_set = set(highlight_ma_cols or [])
 
-    for ma_col in DEFAULT_MA_COLS:
+    ma_cols = list(DEFAULT_MA_COLS)
+
+    for ma_col in ma_cols:
         if ma_col not in plot_df.columns:
             continue
 
@@ -207,6 +226,8 @@ def _make_title(
         "weekly_ma10_breakout": "10MA 돌파",
         "weekly_ma240_breakout": "240MA 돌파",
         "monthly_ma10_breakout": "10MA 돌파",
+        "monthly_ma120_breakout": "120MA 돌파",
+        "monthly_ma180_breakout": "180MA 돌파",
         "monthly_ma240_breakout": "240MA 돌파",
     }
     breakout_label = breakout_map.get(title_suffix, "")
@@ -279,7 +300,7 @@ def _format_value(v) -> Optional[str]:
         return str(v)
 
 
-def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame) -> None:
+def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> None:
     if plot_df.empty:
         return
 
@@ -294,13 +315,30 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame) -> None:
     if ma10_val is not None:
         lines.append(f"10이평 {ma10_val}")
 
-    ma120_val = _format_value(last_row.get("ma120"))
-    if ma120_val is not None:
-        lines.append(f"120이평 {ma120_val}")
+    if timeframe == "monthly":
+        ma120_val = _format_value(last_row.get("ma120"))
+        if ma120_val is not None:
+            lines.append(f"120이평 {ma120_val}")
 
-    ma240_val = _format_value(last_row.get("ma240"))
-    if ma240_val is not None:
-        lines.append(f"240이평 {ma240_val}")
+        ma180_val = _format_value(last_row.get("ma180"))
+        if ma180_val is not None:
+            lines.append(f"180이평 {ma180_val}")
+
+        ma240_val = _format_value(last_row.get("ma240"))
+        if ma240_val is not None:
+            lines.append(f"240이평 {ma240_val}")
+    else:
+        ma120_val = _format_value(last_row.get("ma120"))
+        if ma120_val is not None:
+            lines.append(f"120이평 {ma120_val}")
+
+        ma180_val = _format_value(last_row.get("ma180"))
+        if ma180_val is not None:
+            lines.append(f"180이평 {ma180_val}")
+
+        ma240_val = _format_value(last_row.get("ma240"))
+        if ma240_val is not None:
+            lines.append(f"240이평 {ma240_val}")
 
     if not lines:
         return
@@ -376,10 +414,9 @@ def _build_chart_figure(
         },
     )
 
-    addplots = _build_addplots(plot_df, highlight_ma_cols=ma_cols)
+    addplots = _build_addplots(plot_df, highlight_ma_cols=ma_cols, timeframe=timeframe)
 
-    fig, axes = mpf.plot(
-        mpf_df,
+    plot_kwargs = dict(
         type="candle",
         style=chart_style,
         volume=True,
@@ -387,7 +424,6 @@ def _build_chart_figure(
         figratio=(14, 8),
         figscale=1.1,
         tight_layout=True,
-        addplot=addplots if addplots else None,
         update_width_config=dict(
             candle_width=0.75,
             candle_linewidth=0.8,
@@ -395,6 +431,16 @@ def _build_chart_figure(
         ),
         returnfig=True,
     )
+    if addplots:
+        plot_kwargs["addplot"] = addplots
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Attempting to set identical low and high ylims makes transformation singular; automatically expanding\\.",
+            category=UserWarning,
+        )
+        fig, axes = mpf.plot(mpf_df, **plot_kwargs)
 
     if axes:
         main_ax = axes[0]
@@ -408,7 +454,7 @@ def _build_chart_figure(
                 frameon=True,
             )
 
-        _add_last_bar_info_box(main_ax, plot_df)
+        _add_last_bar_info_box(main_ax, plot_df, timeframe=timeframe)
 
     return fig, axes, plot_df
 
@@ -635,6 +681,15 @@ def create_scan_overview_html(
     html_path = os.path.join(save_root, html_filename)
     sort_key = "strength" if sort_by not in {"strength", "code"} else sort_by
 
+    if timestamp:
+        try:
+            scan_dt = pd.to_datetime(timestamp, format="%Y%m%d_%H%M%S")
+            scan_time_text = scan_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            scan_time_text = str(timestamp)
+    else:
+        scan_time_text = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+
     filtered = _filter_results_by_breakout_pct(results, min_pct=0.5, max_pct=5.0)
 
     sections = []
@@ -749,6 +804,7 @@ def create_scan_overview_html(
         .wrap {{ max-width: 1440px; margin: 0 auto; padding: 24px; }}
         h1 {{ margin: 0 0 6px; font-size: 28px; }}
         .desc {{ margin: 0 0 24px; color: var(--muted); }}
+        .scan-time {{ margin: 0 0 18px; color: #3f4c5e; font-size: 14px; }}
         section {{
             background: var(--surface);
             border: 1px solid var(--line);
@@ -850,6 +906,7 @@ def create_scan_overview_html(
     <main class=\"wrap\">
         <h1>스캔 결과 이미지 모음</h1>
         <p class=\"desc\">이동평균 케이스별 저장 차트를 한 화면에서 확인합니다. 정렬 기준: {escape(sort_key)}</p>
+        <p class="scan-time">스캔 시각: {escape(scan_time_text)}</p>
         {overview_table_block}
         {''.join(sections)}
     </main>

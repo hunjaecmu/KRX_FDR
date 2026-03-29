@@ -51,14 +51,26 @@
 - `breakout_pct`
 - `is_final`
 
-## 4. 병렬 처리
+## 4. 스캔 대상 제외 규칙
+
+스캔 시작 전 종목명 기준으로 아래 패턴을 포함하면 대상에서 제외합니다.
+
+- `ETF`
+- `ETN`
+- `SPAC`
+- `스팩`
+- `기업인수목적`
+
+실행 로그에 제외 수량이 출력됩니다.
+
+## 5. 병렬 처리
 
 - 기본 worker: `max(1, os.cpu_count() - 1)`
 - `ProcessPoolExecutor` 사용
 - 100건 단위 진행률 출력
 - worker 예외는 경고 출력 후 계속 진행
 
-## 5. 결과 저장 구조
+## 6. 결과 저장 구조
 
 `save_scan_results_to_csv` 출력:
 
@@ -74,14 +86,14 @@
 
 - 기본적으로 `breakout_strength` 오름차순(낮은 값 먼저)
 
-## 6. 인터페이스
+## 7. 인터페이스
 
 - `scan_all_breakouts(max_workers=None)`
   - 외부 호출용 래퍼
 - `print_scan_results(results)`
 - `save_scan_results_to_csv(results, output_root=None, timestamp=None)`
 
-## 7. 사용 예시
+## 8. 사용 예시
 
 ```python
 from market_scanner import scan_all_breakouts, print_scan_results, save_scan_results_to_csv
@@ -92,7 +104,7 @@ folder = save_scan_results_to_csv(results)
 print(folder)
 ```
 
-## 8. 의존성
+## 9. 의존성
 
 - pandas
 - data_loader.py

@@ -15,7 +15,7 @@
 #Home / End 로 처음/끝 이동
 #S 로 현재 화면 이미지 저장
 #Q / Esc 로 종료
-#MA5 / MA10 / MA20 / MA120 / MA240 표시
+#MA5 / MA10 / MA20 / MA120 / MA180 / MA240 표시
 #마지막 봉 기준 정보 박스 표시
 #종가
 #10이평
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from typing import Optional
 
 import pandas as pd
@@ -42,7 +43,7 @@ from data_loader import load_master, load_weekly, load_monthly
 
 
 LOOKBACK_BARS = 52
-DEFAULT_MA_COLS = ["ma5", "ma10", "ma20", "ma120", "ma240"]
+DEFAULT_MA_COLS = ["ma5", "ma10", "ma20", "ma120", "ma180", "ma240"]
 
 _FONT_CONFIGURED = False
 _SELECTED_FONT: Optional[str] = None
@@ -235,10 +236,14 @@ def _prepare_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     return work
 
 
-def _build_addplots(plot_df: pd.DataFrame) -> list:
+def _build_addplots(plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> list:
     addplots = []
 
-    for ma_col in DEFAULT_MA_COLS:
+    ma_cols = list(DEFAULT_MA_COLS)
+    if timeframe == "monthly":
+        ma_cols = [c for c in ma_cols if c != "ma120"]
+
+    for ma_col in ma_cols:
         if ma_col not in plot_df.columns:
             continue
 
@@ -287,7 +292,7 @@ def _make_save_path(code: str, name: str, timeframe: str, anchor_date: pd.Timest
     )
 
 
-def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame) -> None:
+def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> None:
     if plot_df.empty:
         return
 
@@ -303,13 +308,18 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame) -> None:
     if ma10_val is not None:
         lines.append(f"10이평 {ma10_val}")
 
-    ma120_val = _format_value(last_row.get("ma120"))
-    if ma120_val is not None:
-        lines.append(f"120이평 {ma120_val}")
-
     ma240_val = _format_value(last_row.get("ma240"))
     if ma240_val is not None:
         lines.append(f"240이평 {ma240_val}")
+
+    if timeframe != "monthly":
+        ma120_val = _format_value(last_row.get("ma120"))
+        if ma120_val is not None:
+            lines.append(f"120이평 {ma120_val}")
+
+        ma180_val = _format_value(last_row.get("ma180"))
+        if ma180_val is not None:
+            lines.append(f"180이평 {ma180_val}")
 
     if not lines:
         return
@@ -448,7 +458,7 @@ class HistoricalChartExplorer:
         self.current_anchor_date = anchor_date
 
         mpf_df = _prepare_ohlcv(plot_df)
-        addplots = _build_addplots(plot_df)
+        addplots = _build_addplots(plot_df, timeframe=self.timeframe)
 
         title = _make_title(
             code=self.code,
@@ -477,8 +487,7 @@ class HistoricalChartExplorer:
             },
         )
 
-        fig, axes = mpf.plot(
-            mpf_df,
+        plot_kwargs = dict(
             type="candle",
             style=chart_style,
             volume=True,
@@ -486,7 +495,6 @@ class HistoricalChartExplorer:
             figratio=(14, 8),
             figscale=1.1,
             tight_layout=True,
-            addplot=addplots if addplots else None,
             update_width_config=dict(
                 candle_width=0.75,
                 candle_linewidth=0.8,
@@ -494,6 +502,16 @@ class HistoricalChartExplorer:
             ),
             returnfig=True,
         )
+        if addplots:
+            plot_kwargs["addplot"] = addplots
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Attempting to set identical low and high ylims makes transformation singular; automatically expanding\\.",
+                category=UserWarning,
+            )
+            fig, axes = mpf.plot(mpf_df, **plot_kwargs)
 
         self.current_fig = fig
 
@@ -509,7 +527,7 @@ class HistoricalChartExplorer:
                     frameon=True,
                 )
 
-            _add_last_bar_info_box(main_ax, plot_df)
+            _add_last_bar_info_box(main_ax, plot_df, timeframe=self.timeframe)
 
         info_text = (
             "←/→ : 이전/다음 1봉   "

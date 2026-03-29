@@ -66,7 +66,7 @@ def _load_csv_with_date(file_path: str) -> pd.DataFrame:
 
     numeric_cols = [
         "open", "high", "low", "close", "volume",
-        "ma5", "ma10", "ma20", "ma120", "ma240"
+        "ma5", "ma10", "ma20", "ma120", "ma180", "ma240"
     ]
     for col in numeric_cols:
         if col in df.columns:
