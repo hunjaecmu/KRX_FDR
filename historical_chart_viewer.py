@@ -44,6 +44,16 @@ from data_loader import load_master, load_weekly, load_monthly
 
 LOOKBACK_BARS = 52
 DEFAULT_MA_COLS = ["ma5", "ma10", "ma20", "ma120", "ma180", "ma240"]
+BASE_MA_WIDTH = 1.2
+
+MA_LINE_COLORS = {
+    "ma5": "#f59e0b",
+    "ma10": "#ef4444",
+    "ma20": "#14b8a6",
+    "ma120": "#3b82f6",
+    "ma180": "#64748b",
+    "ma240": "#22c55e",
+}
 
 _FONT_CONFIGURED = False
 _SELECTED_FONT: Optional[str] = None
@@ -240,8 +250,6 @@ def _build_addplots(plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> l
     addplots = []
 
     ma_cols = list(DEFAULT_MA_COLS)
-    if timeframe == "monthly":
-        ma_cols = [c for c in ma_cols if c != "ma120"]
 
     for ma_col in ma_cols:
         if ma_col not in plot_df.columns:
@@ -256,7 +264,8 @@ def _build_addplots(plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> l
                 series,
                 panel=0,
                 label=ma_col.upper(),
-                width=1.2,
+                width=BASE_MA_WIDTH,
+                color=MA_LINE_COLORS.get(ma_col),
             )
         )
 
@@ -304,22 +313,29 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[s
     if close_val is not None:
         lines.append(f"종가   {close_val}")
 
+    ma5_val = _format_value(last_row.get("ma5"))
+    if ma5_val is not None:
+        lines.append(f"5이평  {ma5_val}")
+
     ma10_val = _format_value(last_row.get("ma10"))
     if ma10_val is not None:
         lines.append(f"10이평 {ma10_val}")
 
+    ma20_val = _format_value(last_row.get("ma20"))
+    if ma20_val is not None:
+        lines.append(f"20이평 {ma20_val}")
+
+    ma120_val = _format_value(last_row.get("ma120"))
+    if ma120_val is not None:
+        lines.append(f"120이평 {ma120_val}")
+
+    ma180_val = _format_value(last_row.get("ma180"))
+    if ma180_val is not None:
+        lines.append(f"180이평 {ma180_val}")
+
     ma240_val = _format_value(last_row.get("ma240"))
     if ma240_val is not None:
         lines.append(f"240이평 {ma240_val}")
-
-    if timeframe != "monthly":
-        ma120_val = _format_value(last_row.get("ma120"))
-        if ma120_val is not None:
-            lines.append(f"120이평 {ma120_val}")
-
-        ma180_val = _format_value(last_row.get("ma180"))
-        if ma180_val is not None:
-            lines.append(f"180이평 {ma180_val}")
 
     if not lines:
         return
@@ -355,7 +371,7 @@ def _make_title(code: str, name: str, timeframe: str, anchor_date: pd.Timestamp,
     )
 
 
-def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
+def _apply_custom_xaxis_labels(axes, dates: pd.Index, timeframe: Optional[str] = None) -> None:
     if not axes or dates is None or len(dates) == 0:
         return
 
@@ -365,6 +381,7 @@ def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
 
     prev_year = None
     prev_month = None
+    monthly_tick_months = {1, 3, 6, 9}
 
     for i, dt in enumerate(pd.to_datetime(dates)):
         year = int(dt.year)
@@ -374,8 +391,13 @@ def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
             ticks.append(float(i))
             labels.append(str(year))
         elif prev_month is None or month != prev_month:
-            ticks.append(float(i))
-            labels.append(f"{month:02d}")
+            if timeframe == "monthly":
+                if month in monthly_tick_months:
+                    ticks.append(float(i))
+                    labels.append(f"{month:02d}")
+            else:
+                ticks.append(float(i))
+                labels.append(f"{month:02d}")
 
         prev_year = year
         prev_month = month
@@ -613,7 +635,7 @@ class HistoricalChartExplorer:
 
             _add_last_bar_info_box(main_ax, plot_df, timeframe=self.timeframe)
             _shrink_candle_side_margins(axes, len(mpf_df), ratio=1 / 3)
-            _apply_custom_xaxis_labels(axes, mpf_df.index)
+            _apply_custom_xaxis_labels(axes, mpf_df.index, timeframe=self.timeframe)
 
         fig.subplots_adjust(top=0.88, bottom=0.22, left=0.07, right=0.98)
 

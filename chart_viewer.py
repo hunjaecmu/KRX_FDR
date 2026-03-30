@@ -37,6 +37,16 @@ LOOKBACK_RATIO = 2 / 3
 
 BASE_MA_WIDTH = 1.2
 HIGHLIGHT_MULTIPLIER = 1.5
+HIGHLIGHT_MULTIPLIER_MA10 = 2.0
+
+MA_LINE_COLORS = {
+    "ma5": "#f59e0b",
+    "ma10": "#ef4444",
+    "ma20": "#14b8a6",
+    "ma120": "#3b82f6",
+    "ma180": "#64748b",
+    "ma240": "#22c55e",
+}
 
 CASE_META = {
     "weekly_ma10_breakout": {
@@ -192,7 +202,12 @@ def _build_addplots(
 
         width = BASE_MA_WIDTH
         if ma_col in highlight_set:
-            width = BASE_MA_WIDTH * HIGHLIGHT_MULTIPLIER
+            if ma_col == "ma10":
+                width = BASE_MA_WIDTH * HIGHLIGHT_MULTIPLIER_MA10
+            else:
+                width = BASE_MA_WIDTH * HIGHLIGHT_MULTIPLIER
+
+        line_color = MA_LINE_COLORS.get(ma_col)
 
         addplots.append(
             mpf.make_addplot(
@@ -200,6 +215,7 @@ def _build_addplots(
                 panel=0,
                 label=ma_col.upper(),
                 width=width,
+                color=line_color,
             )
         )
 
@@ -311,34 +327,29 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[s
     if close_val is not None:
         lines.append(f"종가   {close_val}")
 
+    ma5_val = _format_value(last_row.get("ma5"))
+    if ma5_val is not None:
+        lines.append(f"5이평  {ma5_val}")
+
     ma10_val = _format_value(last_row.get("ma10"))
     if ma10_val is not None:
         lines.append(f"10이평 {ma10_val}")
 
-    if timeframe == "monthly":
-        ma120_val = _format_value(last_row.get("ma120"))
-        if ma120_val is not None:
-            lines.append(f"120이평 {ma120_val}")
+    ma20_val = _format_value(last_row.get("ma20"))
+    if ma20_val is not None:
+        lines.append(f"20이평 {ma20_val}")
 
-        ma180_val = _format_value(last_row.get("ma180"))
-        if ma180_val is not None:
-            lines.append(f"180이평 {ma180_val}")
+    ma120_val = _format_value(last_row.get("ma120"))
+    if ma120_val is not None:
+        lines.append(f"120이평 {ma120_val}")
 
-        ma240_val = _format_value(last_row.get("ma240"))
-        if ma240_val is not None:
-            lines.append(f"240이평 {ma240_val}")
-    else:
-        ma120_val = _format_value(last_row.get("ma120"))
-        if ma120_val is not None:
-            lines.append(f"120이평 {ma120_val}")
+    ma180_val = _format_value(last_row.get("ma180"))
+    if ma180_val is not None:
+        lines.append(f"180이평 {ma180_val}")
 
-        ma180_val = _format_value(last_row.get("ma180"))
-        if ma180_val is not None:
-            lines.append(f"180이평 {ma180_val}")
-
-        ma240_val = _format_value(last_row.get("ma240"))
-        if ma240_val is not None:
-            lines.append(f"240이평 {ma240_val}")
+    ma240_val = _format_value(last_row.get("ma240"))
+    if ma240_val is not None:
+        lines.append(f"240이평 {ma240_val}")
 
     if not lines:
         return
@@ -357,7 +368,23 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[s
     )
 
 
-def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
+def _calc_visible_volume_pct(plot_df: pd.DataFrame) -> Optional[float]:
+    if plot_df is None or plot_df.empty or "volume" not in plot_df.columns:
+        return None
+
+    volume = pd.to_numeric(plot_df["volume"], errors="coerce").fillna(0)
+    if volume.empty:
+        return None
+
+    max_volume = float(volume.max())
+    if max_volume <= 0:
+        return None
+
+    last_volume = float(volume.iloc[-1])
+    return (last_volume / max_volume) * 100.0
+
+
+def _apply_custom_xaxis_labels(axes, dates: pd.Index, timeframe: Optional[str] = None) -> None:
     if not axes or dates is None or len(dates) == 0:
         return
 
@@ -367,6 +394,7 @@ def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
 
     prev_year = None
     prev_month = None
+    monthly_tick_months = {1, 3, 6, 9}
 
     for i, dt in enumerate(pd.to_datetime(dates)):
         year = int(dt.year)
@@ -376,8 +404,13 @@ def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
             ticks.append(float(i))
             labels.append(str(year))
         elif prev_month is None or month != prev_month:
-            ticks.append(float(i))
-            labels.append(f"{month:02d}")
+            if timeframe == "monthly":
+                if month in monthly_tick_months:
+                    ticks.append(float(i))
+                    labels.append(f"{month:02d}")
+            else:
+                ticks.append(float(i))
+                labels.append(f"{month:02d}")
 
         prev_year = year
         prev_month = month
@@ -415,6 +448,27 @@ def _apply_custom_xaxis_labels(axes, dates: pd.Index) -> None:
         label.set_rotation(0)
         label.set_rotation_mode("anchor")
         label.set_clip_on(False)
+
+
+def _shrink_candle_side_margins(axes, data_len: int, ratio: float = 1 / 3) -> None:
+    if not axes or data_len <= 0:
+        return
+
+    ratio = max(0.0, min(1.0, float(ratio)))
+    left_edge = 0.0
+    right_edge = float(data_len - 1)
+
+    base_ax = axes[-1]
+    cur_left, cur_right = base_ax.get_xlim()
+
+    left_pad = max(0.0, left_edge - cur_left)
+    right_pad = max(0.0, cur_right - right_edge)
+
+    new_left = left_edge - (left_pad * ratio)
+    new_right = right_edge + (right_pad * ratio)
+
+    for ax in axes:
+        ax.set_xlim(new_left, new_right)
 
 
 def _build_chart_figure(
@@ -484,7 +538,7 @@ def _build_chart_figure(
         xrotation=0,
         figratio=(14, 8),
         figscale=1.1,
-        tight_layout=True,
+        tight_layout=False,
         update_width_config=dict(
             candle_width=0.75,
             candle_linewidth=0.8,
@@ -516,7 +570,10 @@ def _build_chart_figure(
             )
 
         _add_last_bar_info_box(main_ax, plot_df, timeframe=timeframe)
-        _apply_custom_xaxis_labels(axes, mpf_df.index)
+        _shrink_candle_side_margins(axes, len(mpf_df), ratio=1 / 3)
+        _apply_custom_xaxis_labels(axes, mpf_df.index, timeframe=timeframe)
+
+    fig.subplots_adjust(top=0.88, bottom=0.22, left=0.07, right=0.98)
 
     return fig, axes, plot_df
 
@@ -700,6 +757,9 @@ def auto_slide_breakout_charts(
                 plt.close(fig)
 
 def show_breakout_charts(results: dict, save_root: Optional[str] = None):
+    total_charts = sum(len(results.get(case_key, [])) for case_key in CASE_META.keys())
+    built_count = 0
+
     for case_key, meta in CASE_META.items():
         items = results.get(case_key, [])
         print(f"\n=== {meta['label']} 차트 ({len(items)}개) ===")
@@ -708,7 +768,13 @@ def show_breakout_charts(results: dict, save_root: Optional[str] = None):
         if save_root:
             case_save_dir = os.path.join(save_root, "charts", case_key)
 
-        for item in items:
+        for idx, item in enumerate(items, start=1):
+            built_count += 1
+            print(
+                f"[CHART] 생성중 {built_count}/{total_charts} "
+                f"(케이스 {idx}/{len(items)}) | "
+                f"{item['code']} {item['name']} | {meta['label']}"
+            )
             show_candle_chart(
                 code=item["code"],
                 name=item["name"],

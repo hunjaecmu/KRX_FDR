@@ -10,7 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
-from config import OUTPUT_DIR
+from config import OUTPUT_DIR, CHART_LOOKBACK_WEEKLY, CHART_LOOKBACK_MONTHLY
 from data_loader import load_master, load_weekly, load_monthly
 
 
@@ -48,6 +48,7 @@ SCAN_CASES = {
 }
 
 DEFAULT_MAX_WORKERS = max(1, (os.cpu_count() or 2) - 1)
+LOOKBACK_RATIO = 2 / 3
 
 # 스캔 대상에서 제외할 종목명 패턴 (ETF/ETN/스팩)
 EXCLUDED_NAME_PATTERNS = [
@@ -75,7 +76,32 @@ def _load_by_timeframe(code: str, timeframe: str) -> pd.DataFrame:
     raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
 
 
-def detect_breakout_up(df: pd.DataFrame, ma_col: str) -> Optional[dict]:
+def _effective_lookback(lookback: int, actual_len: int) -> int:
+    reduced = max(1, int(lookback * LOOKBACK_RATIO))
+    return min(actual_len, reduced)
+
+
+def _calc_visible_volume_pct(df: pd.DataFrame, lookback: Optional[int]) -> Optional[float]:
+    if df is None or df.empty or "volume" not in df.columns:
+        return None
+
+    target_df = df
+    if lookback is not None and lookback > 0:
+        target_df = df.tail(_effective_lookback(lookback, len(df))).copy()
+
+    if target_df.empty:
+        return None
+
+    volume = pd.to_numeric(target_df["volume"], errors="coerce").fillna(0)
+    max_volume = float(volume.max()) if len(volume) > 0 else 0.0
+    if max_volume <= 0:
+        return None
+
+    last_volume = float(volume.iloc[-1])
+    return (last_volume / max_volume) * 100.0
+
+
+def detect_breakout_up(df: pd.DataFrame, ma_col: str, lookback: Optional[int] = None) -> Optional[dict]:
     """
     상향 돌파 조건:
       이전 봉 close <= 이전 봉 MA
@@ -120,6 +146,7 @@ def detect_breakout_up(df: pd.DataFrame, ma_col: str) -> Optional[dict]:
         return None
 
     strength = (curr_close / curr_ma) - 1.0 if curr_ma != 0 else None
+    volume_pct = _calc_visible_volume_pct(ordered, lookback=lookback)
 
     return {
         "date": pd.to_datetime(curr_row["date"]),
@@ -129,6 +156,7 @@ def detect_breakout_up(df: pd.DataFrame, ma_col: str) -> Optional[dict]:
         "prev_ma_value": prev_ma,
         "breakout_strength": strength,
         "breakout_pct": strength * 100 if strength is not None else None,
+        "volume_pct": volume_pct,
         "is_final": curr_row["is_final"] if "is_final" in curr_row.index else None,
     }
 
@@ -144,7 +172,8 @@ def _scan_one_stock(row_data: tuple[str, str]) -> list[dict]:
     for case_key, meta in SCAN_CASES.items():
         try:
             df = _load_by_timeframe(code, meta["timeframe"])
-            info = detect_breakout_up(df, meta["ma_col"])
+            lookback = CHART_LOOKBACK_WEEKLY if meta["timeframe"] == "weekly" else CHART_LOOKBACK_MONTHLY
+            info = detect_breakout_up(df, meta["ma_col"], lookback=lookback)
             if info is None:
                 continue
 
@@ -162,6 +191,7 @@ def _scan_one_stock(row_data: tuple[str, str]) -> list[dict]:
                 "prev_ma_value": info["prev_ma_value"],
                 "breakout_strength": info["breakout_strength"],
                 "breakout_pct": info["breakout_pct"],
+                "volume_pct": info["volume_pct"],
                 "is_final": info["is_final"],
             })
         except Exception:
@@ -248,6 +278,8 @@ def print_scan_results(results: dict[str, list[dict]]) -> None:
         for i, item in enumerate(items, start=1):
             strength_pct = item["breakout_pct"]
             strength_text = f"{strength_pct:.2f}%" if strength_pct is not None else "N/A"
+            volume_pct = item.get("volume_pct")
+            volume_text = f"{float(volume_pct):.2f}%" if volume_pct is not None else "N/A"
 
             print(
                 f"{i:>3}. {item['code']} {item['name']} | "
@@ -255,6 +287,7 @@ def print_scan_results(results: dict[str, list[dict]]) -> None:
                 f"close={item['close']:.2f} | "
                 f"{item['ma_col']}={item['ma_value']:.2f} | "
                 f"strength={strength_text} | "
+                f"volume%={volume_text} | "
                 f"is_final={item['is_final']}"
             )
 
@@ -276,7 +309,7 @@ def save_scan_results_to_csv(
         - weekly_ma10_breakout.csv
         - weekly_ma240_breakout.csv
         - monthly_ma10_breakout.csv
-                - monthly_ma240_breakout.csv
+        - monthly_ma240_breakout.csv
     """
     if output_root is None:
         output_root = OUTPUT_DIR
@@ -299,7 +332,7 @@ def save_scan_results_to_csv(
                 "scan_case", "scan_label", "timeframe", "ma_col",
                 "code", "name", "date",
                 "close", "ma_value", "prev_close", "prev_ma_value",
-                "breakout_strength", "breakout_pct", "is_final",
+                "breakout_strength", "breakout_pct", "volume_pct", "is_final",
             ])
         else:
             # 돌파강도 낮은 순 정렬
