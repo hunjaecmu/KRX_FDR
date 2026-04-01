@@ -6,6 +6,7 @@
 
 `scan_market.py`는 다음 순서로 동작합니다.
 
+0. 스크립트 직접 실행 시 프로젝트 루트를 `sys.path`에 추가
 1. `scan_all_breakouts()` 실행
 2. 콘솔 출력 (`print_scan_results`)
 3. CSV 저장 (`save_scan_results_to_csv`)

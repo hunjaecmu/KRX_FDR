@@ -1,5 +1,13 @@
 # scripts/scan_market.py
 
+import os
+import sys
+
+# Ensure project root is importable when this script is executed directly.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from market_scanner import (
     scan_all_breakouts,
     print_scan_results,

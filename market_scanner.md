@@ -31,7 +31,7 @@
 
 ## 3. 돌파 판정 규칙
 
-`detect_breakout_up(df, ma_col)` 규칙:
+`detect_breakout_up(df, ma_col, lookback=None)` 규칙:
 
 1. `date`, `close`, `ma_col` 존재 여부 확인
 2. 날짜순 정렬
@@ -42,6 +42,13 @@
 7. 조건:
    - 이전 봉: `close <= MA`
    - 현재 봉: `close > MA`
+8. 돌파 감지 시 최근 가시 구간 기준 거래량 비율(`volume_pct`) 계산
+
+거래량 비율 계산:
+
+- 케이스별 lookback(`CHART_LOOKBACK_WEEKLY`/`CHART_LOOKBACK_MONTHLY`)를 입력으로 사용
+- 내부 가시 구간은 `lookback * 2/3`(`LOOKBACK_RATIO`)로 축소 적용
+- `volume_pct = (최신봉 거래량 / 가시구간 최대 거래량) * 100`
 
 출력 필드:
 
@@ -49,6 +56,7 @@
 - `prev_close`, `prev_ma_value`
 - `breakout_strength` (`close/ma - 1`)
 - `breakout_pct`
+- `volume_pct`
 - `is_final`
 
 ## 4. 스캔 대상 제외 규칙
@@ -85,12 +93,14 @@
 정렬 기준:
 
 - 기본적으로 `breakout_strength` 오름차순(낮은 값 먼저)
+- 저장 컬럼에 `volume_pct` 포함
 
 ## 7. 인터페이스
 
 - `scan_all_breakouts(max_workers=None)`
   - 외부 호출용 래퍼
 - `print_scan_results(results)`
+  - 콘솔에 `strength`와 함께 `volume%` 출력
 - `save_scan_results_to_csv(results, output_root=None, timestamp=None)`
 
 ## 8. 사용 예시
@@ -108,4 +118,4 @@ print(folder)
 
 - pandas
 - data_loader.py
-- config.py (`OUTPUT_DIR`)
+- config.py (`OUTPUT_DIR`, `CHART_LOOKBACK_WEEKLY`, `CHART_LOOKBACK_MONTHLY`)
