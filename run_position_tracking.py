@@ -16,7 +16,6 @@ def main() -> None:
         print(f"status={result.get('status')}")
         print(f"message={result.get('message')}")
         print(f"holdings_csv={result.get('holdings_csv')}")
-        print(f"watchlist_csv={result.get('watchlist_csv')}")
 
 
 if __name__ == "__main__":

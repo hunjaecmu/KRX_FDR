@@ -21,19 +21,33 @@
 - `CHART_LOOKBACK_WEEKLY = 80`
 - `CHART_LOOKBACK_MONTHLY = 80`
 
-### 2.3 입출력 루트 경로
+### 2.3 배포 친화 경로 설정
 
-- `OUTPUT_DIR = D:\KRX_FDR_Data\output`
-- `DATA_DIR = D:\KRX_FDR_Data\data`
+- `BASE_DIR = Path(__file__).resolve().parent`
+- `APP_DATA_DIR = os.getenv("APP_DATA_DIR", BASE_DIR/.app_data)`
+- `DATA_DIR = os.getenv("DATA_DIR", APP_DATA_DIR/data)`
+- `OUTPUT_DIR = os.getenv("OUTPUT_DIR", APP_DATA_DIR/output)`
+
+우선순위:
+
+1. `DATA_DIR`, `OUTPUT_DIR` 환경변수
+2. `APP_DATA_DIR` 환경변수
+3. 기본값(`프로젝트/.app_data`)
 
 ### 2.4 포지션 트래킹 경로
 
 - `TRACKING_INPUT_DIR = DATA_DIR/tracking`
 - `HOLDINGS_CSV = TRACKING_INPUT_DIR/holdings.csv`
-- `WATCHLIST_CSV = TRACKING_INPUT_DIR/watchlist.csv`
+- `INTEREST_WATCH_CSV = TRACKING_INPUT_DIR/watch.csv`
 - `TRACKING_OUTPUT_DIR = OUTPUT_DIR/position_tracking`
 
-### 2.5 실행 모드
+### 2.5 웹 입력/기록 파일 옵션
+
+- `RECORD_FILE_OPTIONS`
+  - 주/월봉 분류별 고정 저장 파일명 목록
+  - `web_app.py`에서 패턴 데이터 저장 파일 선택에 사용
+
+### 2.6 실행 모드
 
 - `RUN_MODE = "batch"` 또는 `"manual"`
 - `RUN_MODE`에 따라 자동 설정:
@@ -42,7 +56,9 @@
 
 ## 3. 운영 팁
 
-- 경로가 로컬 환경과 다르면 먼저 `OUTPUT_DIR`, `DATA_DIR`를 수정하세요.
+- Streamlit Cloud 등 호스팅 환경에서는 코드 수정 대신 환경변수 설정을 권장합니다.
+  - `APP_DATA_DIR` 또는 `DATA_DIR`/`OUTPUT_DIR`
+- `config.py`는 시작 시 데이터/출력/tracking 폴더를 자동 생성합니다.
 - 서버/자동배치에서는 보통 `RUN_MODE="batch"`를 권장합니다.
 - 차트를 화면으로 확인하려면 `RUN_MODE="manual"`로 전환하세요.
 

@@ -1,10 +1,10 @@
 # position_tracker.py
 
-보유/관심 종목 CSV를 읽어 현재 수익률과 이평 거리 지표를 스냅샷으로 저장하는 모듈 문서입니다.
+보유 종목 CSV를 읽어 현재 수익률과 이평 거리 지표를 스냅샷으로 저장하는 모듈 문서입니다.
 
 ## 1. 역할 요약
 
-`position_tracker.py`는 두 입력 파일(보유/관심)을 표준화하여, 종목별 최신 지표를 계산하고 결과를 파일로 저장합니다.
+`position_tracker.py`는 보유 종목 입력 파일을 표준화하여, 종목별 최신 지표를 계산하고 결과를 파일로 저장합니다.
 
 주요 기능:
 
@@ -18,7 +18,6 @@
 입력 (`config.py`):
 
 - `HOLDINGS_CSV`
-- `WATCHLIST_CSV`
 
 출력 (`TRACKING_OUTPUT_DIR`):
 
@@ -41,7 +40,6 @@
 `source`는 내부적으로:
 
 - 보유 = `H`
-- 관심 = `W`
 
 ## 4. 계산 규칙
 
@@ -67,7 +65,7 @@
 
 ## 5. 주요 함수
 
-- `load_targets(holdings_csv, watchlist_csv)`
+- `load_targets(holdings_csv)`
 - `build_snapshot(targets, now=None)`
 - `save_snapshot(snapshot_df, output_dir, now=None)`
 - `run_position_tracking(...)`
@@ -84,7 +82,7 @@
 입력 없음:
 
 - `status = no_targets`
-- 메시지 + 입력 파일 경로
+- 메시지 + `holdings_csv` 경로
 
 ## 7. 사용 예시
 
