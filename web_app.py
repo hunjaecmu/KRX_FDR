@@ -20,7 +20,14 @@ except ModuleNotFoundError:
     image_select = None
     IMAGE_SELECT_AVAILABLE = False
 
-from config import DATA_DIR, OUTPUT_DIR
+from config import (
+    DATA_DIR,
+    OUTPUT_DIR,
+    TRACKING_INPUT_DIR,
+    HOLDINGS_CSV,
+    INTEREST_WATCH_CSV,
+    RECORD_FILE_OPTIONS,
+)
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
 
@@ -542,7 +549,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                     help="tracking 폴더 아래 고정 파일명 중 하나로 저장됩니다.",
                 )
             else:
-                st.caption("관심 저장 파일: watch.csv")
+                st.caption(f"관심 저장 파일: {os.path.basename(INTEREST_WATCH_CSV)}")
 
         if st.button("현재 차트 데이터 저장", use_container_width=True, key=f"{prefix}_save"):
             try:
@@ -562,9 +569,9 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                     "메모": memo_text,
                 }
 
-                tracking_dir = os.path.join(DATA_DIR, "tracking")
+                tracking_dir = TRACKING_INPUT_DIR
                 if save_mode == "interest":
-                    target_file = os.path.join(tracking_dir, "watch.csv")
+                    target_file = INTEREST_WATCH_CSV
                 else:
                     target_file = os.path.join(tracking_dir, _record_label_to_filename(str(record_file_label)))
 
@@ -578,10 +585,10 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
 def _render_interest_watch_data() -> None:
     st.caption("tracking 폴더의 관심 종목 CSV 데이터를 조회합니다.")
-    tracking_dir = os.path.join(DATA_DIR, "tracking")
+    tracking_dir = TRACKING_INPUT_DIR
     os.makedirs(tracking_dir, exist_ok=True)
 
-    watch_path = os.path.join(tracking_dir, "watch.csv")
+    watch_path = INTEREST_WATCH_CSV
     st.markdown("#### 관심 데이터")
     if os.path.isfile(watch_path):
         try:
@@ -823,7 +830,7 @@ def _render_interest_watch_data() -> None:
 
 def _render_saved_pattern_data() -> None:
     st.caption("tracking 폴더의 기록 CSV 데이터를 조회합니다.")
-    tracking_dir = os.path.join(DATA_DIR, "tracking")
+    tracking_dir = TRACKING_INPUT_DIR
     os.makedirs(tracking_dir, exist_ok=True)
 
     summary_rows = []
@@ -1341,9 +1348,8 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_output_holdings_data() -> None:
-    st.caption("DATA_DIR/tracking/holdings.csv 데이터를 조회합니다.")
-    tracking_dir = os.path.join(DATA_DIR, "tracking")
-    holdings_path = os.path.join(tracking_dir, "holdings.csv")
+    st.caption(f"{HOLDINGS_CSV} 데이터를 조회합니다.")
+    holdings_path = HOLDINGS_CSV
 
     st.markdown("#### 보유 종목 데이터")
     if os.path.isfile(holdings_path):
@@ -2110,16 +2116,6 @@ FEATURE_HELP = {
     "7. 패턴 데이터 조회": "저장된 패턴(기록) 데이터를 조회합니다.",
     "8. 보유 종목 조회": "보유 종목 데이터를 조회합니다.",
 }
-
-RECORD_FILE_OPTIONS = [
-    ("주봉 10이평 돌파 매매", "MA10_J_Break.csv"),
-    ("주봉 240이평 돌파 매매", "MA240_J_Break.csv"),
-    ("월봉 10이평 돌파 매매", "MA10_W_Break.csv"),
-    ("월봉 120이평 돌파 매매", "MA120_W_Break.csv"),
-    ("월봉 180이평 돌파 매매", "MA180_W_Break.csv"),
-    ("월봉 240이평 돌파 매매", "MA240_W_Break.csv"),
-]
-
 
 st.markdown(
     """

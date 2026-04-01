@@ -6,7 +6,7 @@ from typing import Optional
 
 import pandas as pd
 
-from config import HOLDINGS_CSV, WATCHLIST_CSV, TRACKING_OUTPUT_DIR
+from config import HOLDINGS_CSV, TRACKING_OUTPUT_DIR
 from data_loader import load_daily, load_weekly, load_monthly
 
 
@@ -46,8 +46,6 @@ def _normalize_target_csv(file_path: str, source: str) -> pd.DataFrame:
     source_value = str(source).strip().upper()
     if source_value in {"H", "HOLDING", "HOLDINGS"}:
         source_value = "H"
-    elif source_value in {"W", "WATCH", "WATCHLIST"}:
-        source_value = "W"
 
     df = pd.DataFrame()
     df["code"] = raw[code_col].astype(str).str.strip().str.zfill(6)
@@ -186,15 +184,12 @@ def _print_negative_distance_warning(name: str, metrics: dict) -> None:
         )
 
 
-def load_targets(holdings_csv: str, watchlist_csv: str) -> pd.DataFrame:
+def load_targets(holdings_csv: str) -> pd.DataFrame:
     holdings = _normalize_target_csv(holdings_csv, "H")
-    watchlist = _normalize_target_csv(watchlist_csv, "W")
-
-    merged = pd.concat([holdings, watchlist], ignore_index=True)
-    if merged.empty:
+    if holdings.empty:
         return pd.DataFrame(columns=STANDARD_COLUMNS)
 
-    return merged.reset_index(drop=True)
+    return holdings.reset_index(drop=True)
 
 
 def build_snapshot(targets: pd.DataFrame, now: Optional[datetime] = None) -> pd.DataFrame:
@@ -302,16 +297,14 @@ def save_snapshot(snapshot_df: pd.DataFrame, output_dir: str, now: Optional[date
 
 def run_position_tracking(
     holdings_csv: str = HOLDINGS_CSV,
-    watchlist_csv: str = WATCHLIST_CSV,
     output_dir: str = TRACKING_OUTPUT_DIR,
 ) -> dict:
-    targets = load_targets(holdings_csv, watchlist_csv)
+    targets = load_targets(holdings_csv)
     if targets.empty:
         return {
             "status": "no_targets",
-            "message": "입력 CSV(보유/관심종목)가 없거나 유효한 종목코드가 없습니다.",
+            "message": "입력 CSV(보유종목)가 없거나 유효한 종목코드가 없습니다.",
             "holdings_csv": holdings_csv,
-            "watchlist_csv": watchlist_csv,
         }
 
     snapshot_df = build_snapshot(targets)
@@ -323,7 +316,6 @@ def run_position_tracking(
         "snapshot_file": saved["snapshot_file"],
         "history_file": saved["history_file"],
         "holdings_csv": holdings_csv,
-        "watchlist_csv": watchlist_csv,
     }
 
 
