@@ -11,7 +11,14 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
-from streamlit_image_select import image_select
+
+try:
+    from streamlit_image_select import image_select
+
+    IMAGE_SELECT_AVAILABLE = True
+except ModuleNotFoundError:
+    image_select = None
+    IMAGE_SELECT_AVAILABLE = False
 
 from config import DATA_DIR, OUTPUT_DIR
 from data_loader import load_daily, load_master, load_monthly, load_weekly
@@ -2009,22 +2016,35 @@ def _render_case_gallery(
 
     if thumb_images:
         current_thumb_index = min(max(int(st.session_state[idx_key]), 0), len(thumb_items) - 1)
-        picked_thumb = image_select(
-            label="",
-            images=thumb_images,
-            captions=thumb_captions,
-            index=current_thumb_index,
-            return_value="index",
-            use_container_width=False,
-            key=f"img_pick_{case_key}",
-        )
-        if picked_thumb is not None:
-            picked_thumb_index = int(picked_thumb)
-            if 0 <= picked_thumb_index < len(thumb_items):
-                picked_idx = picked_thumb_index
-            else:
-                picked_idx = current_thumb_index
+        if IMAGE_SELECT_AVAILABLE:
+            picked_thumb = image_select(
+                label="",
+                images=thumb_images,
+                captions=thumb_captions,
+                index=current_thumb_index,
+                return_value="index",
+                use_container_width=False,
+                key=f"img_pick_{case_key}",
+            )
+            if picked_thumb is not None:
+                picked_thumb_index = int(picked_thumb)
+                if 0 <= picked_thumb_index < len(thumb_items):
+                    picked_idx = picked_thumb_index
+                else:
+                    picked_idx = current_thumb_index
 
+                if 0 <= picked_idx < len(gallery_items) and picked_idx != st.session_state[idx_key]:
+                    st.session_state[idx_key] = picked_idx
+                    st.rerun()
+        else:
+            st.info("썸네일 선택 기능을 사용하려면 streamlit-image-select 패키지를 설치하세요.")
+            picked_idx = st.selectbox(
+                "종목 선택",
+                options=list(range(len(thumb_items))),
+                index=current_thumb_index,
+                format_func=lambda i: thumb_captions[i],
+                key=f"img_pick_fallback_{case_key}",
+            )
             if 0 <= picked_idx < len(gallery_items) and picked_idx != st.session_state[idx_key]:
                 st.session_state[idx_key] = picked_idx
                 st.rerun()

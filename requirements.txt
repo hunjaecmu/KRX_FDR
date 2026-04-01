@@ -1,0 +1,6 @@
+streamlit
+streamlit-image-select
+pandas
+matplotlib
+mplfinance
+finance-datareader
