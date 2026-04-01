@@ -21,7 +21,13 @@ def get_monthly_file_path(code: str):
 
 
 def load_master() -> pd.DataFrame:
+    if not os.path.isfile(MASTER_FILE):
+        return pd.DataFrame(columns=["code", "name", "market"])
+
     df = pd.read_csv(MASTER_FILE, dtype={"code": str})
+    if df.empty:
+        return pd.DataFrame(columns=["code", "name", "market"])
+
     df["code"] = df["code"].astype(str).str.zfill(6)
     return df.sort_values("code").reset_index(drop=True)
 
