@@ -222,7 +222,11 @@ def build_mock_chart_data(days: int = 80) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False, ttl=300)
 def get_master_table() -> pd.DataFrame:
-    mdf = load_master().copy()
+    try:
+        mdf = load_master().copy()
+    except Exception:
+        return pd.DataFrame(columns=["code", "name", "market"])
+
     if "code" in mdf.columns:
         mdf["code"] = (
             mdf["code"]
