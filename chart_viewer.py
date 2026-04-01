@@ -543,6 +543,7 @@ def _build_chart_figure(
             candle_width=0.75,
             candle_linewidth=0.8,
             volume_width=0.75,
+            volume_linewidth=0.0,
         ),
         returnfig=True,
     )

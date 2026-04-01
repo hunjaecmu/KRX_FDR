@@ -343,12 +343,12 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[s
     text = "\n".join(lines)
 
     main_ax.text(
-        0.985,
-        0.985,
+        0.015,
+        0.0,
         text,
         transform=main_ax.transAxes,
-        ha="right",
-        va="top",
+        ha="left",
+        va="bottom",
         fontsize=9,
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
     )
@@ -365,8 +365,8 @@ def _make_title(code: str, name: str, timeframe: str, anchor_date: pd.Timestamp,
     start_w = _weekday_kr(start_date)
     return (
         f"{code} {name} | {tf_label} | "
-        f"기준봉 {anchor_date.strftime('%Y-%m-%d')} ({anchor_w}) | "
         f"시작봉 {start_date.strftime('%Y-%m-%d')} ({start_w}) | "
+        f"기준봉 {anchor_date.strftime('%Y-%m-%d')} ({anchor_w}) | "
         f"{LOOKBACK_BARS}봉"
     )
 
@@ -458,6 +458,114 @@ def _shrink_candle_side_margins(axes, data_len: int, ratio: float = 1 / 3) -> No
 
     for ax in axes:
         ax.set_xlim(new_left, new_right)
+
+
+def build_historical_chart_figure(
+    code: str,
+    name: str,
+    timeframe: str,
+    target_date: pd.Timestamp,
+    lookback_bars: int = LOOKBACK_BARS,
+):
+    """Build a static historical chart figure using the same visual rules as explorer mode."""
+    _configure_plot_font()
+
+    df = _load_chart_data(code, timeframe).copy()
+    if df is None or df.empty:
+        raise ValueError("불러올 데이터가 없습니다.")
+
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+
+    valid = df[df["date"] <= pd.to_datetime(target_date)].copy()
+    if valid.empty:
+        raise ValueError("입력한 날짜 이전 데이터가 없습니다.")
+
+    anchor_idx = int(valid.index.max())
+    start_idx = max(0, anchor_idx - int(lookback_bars) + 1)
+    plot_df = df.iloc[start_idx:anchor_idx + 1].copy().reset_index(drop=True)
+    if plot_df.empty:
+        raise ValueError("표시할 데이터가 없습니다.")
+
+    anchor_date = pd.to_datetime(plot_df.iloc[-1]["date"])
+    start_date = pd.to_datetime(plot_df.iloc[0]["date"])
+
+    mpf_df = _prepare_ohlcv(plot_df)
+    addplots = _build_addplots(plot_df, timeframe=timeframe)
+
+    title = _make_title(
+        code=code,
+        name=name,
+        timeframe=timeframe,
+        anchor_date=anchor_date,
+        start_date=start_date,
+    )
+
+    market_colors = mpf.make_marketcolors(
+        up="red",
+        down="blue",
+        edge="inherit",
+        wick="inherit",
+        volume="inherit",
+    )
+    chart_style = mpf.make_mpf_style(
+        base_mpf_style="default",
+        marketcolors=market_colors,
+        facecolor="white",
+        figcolor="white",
+        rc={
+            "font.family": [_SELECTED_FONT, "DejaVu Sans"] if _SELECTED_FONT else ["DejaVu Sans"],
+            "font.sans-serif": [_SELECTED_FONT, "DejaVu Sans"] if _SELECTED_FONT else ["DejaVu Sans"],
+            "axes.unicode_minus": False,
+        },
+    )
+
+    plot_kwargs = dict(
+        type="candle",
+        style=chart_style,
+        volume=True,
+        axtitle=title,
+        xrotation=0,
+        figratio=(14, 8),
+        figscale=1.1,
+        tight_layout=False,
+        update_width_config=dict(
+            candle_width=0.75,
+            candle_linewidth=0.8,
+            volume_width=0.75,
+            volume_linewidth=0.0,
+        ),
+        returnfig=True,
+    )
+    if addplots:
+        plot_kwargs["addplot"] = addplots
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Attempting to set identical low and high ylims makes transformation singular; automatically expanding\\.",
+            category=UserWarning,
+        )
+        fig, axes = mpf.plot(mpf_df, **plot_kwargs)
+
+    if axes:
+        main_ax = axes[0]
+        handles, labels = main_ax.get_legend_handles_labels()
+        if handles and labels:
+            main_ax.legend(
+                handles,
+                labels,
+                loc="upper left",
+                fontsize=9,
+                frameon=True,
+            )
+
+        _add_last_bar_info_box(main_ax, plot_df, timeframe=timeframe)
+        _shrink_candle_side_margins(axes, len(mpf_df), ratio=1 / 3)
+        _apply_custom_xaxis_labels(axes, mpf_df.index, timeframe=timeframe)
+
+    fig.subplots_adjust(top=0.88, bottom=0.22, left=0.07, right=0.98)
+    return fig, anchor_date
 
 
 # =========================
@@ -605,6 +713,7 @@ class HistoricalChartExplorer:
                 candle_width=0.75,
                 candle_linewidth=0.8,
                 volume_width=0.75,
+                volume_linewidth=0.0,
             ),
             returnfig=True,
         )
