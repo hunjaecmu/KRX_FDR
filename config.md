@@ -41,6 +41,11 @@
 - `INTEREST_WATCH_CSV = TRACKING_INPUT_DIR/watch.csv`
 - `TRACKING_OUTPUT_DIR = OUTPUT_DIR/position_tracking`
 
+참고:
+
+- `web_app.py`의 관심종목 저장/조회는 현재 `watch_YYYYMM.csv`(월별 파일) 중심으로 동작합니다.
+- `INTEREST_WATCH_CSV`는 legacy 경로 호환을 위해 유지됩니다.
+
 ### 2.5 웹 입력/기록 파일 옵션
 
 - `RECORD_FILE_OPTIONS`

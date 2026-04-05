@@ -301,7 +301,12 @@ def _make_save_path(code: str, name: str, timeframe: str, anchor_date: pd.Timest
     )
 
 
-def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> None:
+def _add_last_bar_info_box(
+    main_ax,
+    plot_df: pd.DataFrame,
+    timeframe: Optional[str] = None,
+    volume_ax=None,
+) -> None:
     if plot_df.empty:
         return
 
@@ -342,9 +347,18 @@ def _add_last_bar_info_box(main_ax, plot_df: pd.DataFrame, timeframe: Optional[s
 
     text = "\n".join(lines)
 
+    y_pos = 0.5
+    if volume_ax is not None:
+        try:
+            vol_top_disp = volume_ax.transAxes.transform((0.0, 1.0))
+            _, y_in_main = main_ax.transAxes.inverted().transform(vol_top_disp)
+            y_pos = float(min(max(y_in_main, 0.0), 1.0))
+        except Exception:
+            y_pos = 0.5
+
     main_ax.text(
         0.015,
-        0.0,
+        y_pos,
         text,
         transform=main_ax.transAxes,
         ha="left",
@@ -550,6 +564,12 @@ def build_historical_chart_figure(
 
     if axes:
         main_ax = axes[0]
+        volume_ax = None
+        if len(axes) > 1:
+            lower_axes = [ax for ax in axes[1:] if ax.get_position().y0 < main_ax.get_position().y0]
+            if lower_axes:
+                volume_ax = max(lower_axes, key=lambda ax: ax.get_position().y1)
+
         handles, labels = main_ax.get_legend_handles_labels()
         if handles and labels:
             main_ax.legend(
@@ -560,7 +580,7 @@ def build_historical_chart_figure(
                 frameon=True,
             )
 
-        _add_last_bar_info_box(main_ax, plot_df, timeframe=timeframe)
+        _add_last_bar_info_box(main_ax, plot_df, timeframe=timeframe, volume_ax=volume_ax)
         _shrink_candle_side_margins(axes, len(mpf_df), ratio=1 / 3)
         _apply_custom_xaxis_labels(axes, mpf_df.index, timeframe=timeframe)
 
@@ -732,6 +752,12 @@ class HistoricalChartExplorer:
 
         if axes:
             main_ax = axes[0]
+            volume_ax = None
+            if len(axes) > 1:
+                lower_axes = [ax for ax in axes[1:] if ax.get_position().y0 < main_ax.get_position().y0]
+                if lower_axes:
+                    volume_ax = max(lower_axes, key=lambda ax: ax.get_position().y1)
+
             handles, labels = main_ax.get_legend_handles_labels()
             if handles and labels:
                 main_ax.legend(
@@ -742,7 +768,7 @@ class HistoricalChartExplorer:
                     frameon=True,
                 )
 
-            _add_last_bar_info_box(main_ax, plot_df, timeframe=self.timeframe)
+            _add_last_bar_info_box(main_ax, plot_df, timeframe=self.timeframe, volume_ax=volume_ax)
             _shrink_candle_side_margins(axes, len(mpf_df), ratio=1 / 3)
             _apply_custom_xaxis_labels(axes, mpf_df.index, timeframe=self.timeframe)
 

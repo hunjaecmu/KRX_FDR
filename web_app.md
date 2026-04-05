@@ -51,7 +51,6 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 - OUTPUT_DIR
 - TRACKING_INPUT_DIR
 - HOLDINGS_CSV
-- INTEREST_WATCH_CSV
 - RECORD_FILE_OPTIONS
 
 ## 4. 입력/출력 파일
@@ -60,7 +59,9 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 
 - 마스터/시세 데이터: DATA_DIR 하위 csv
 - 보유 종목: HOLDINGS_CSV
-- 관심 종목: INTEREST_WATCH_CSV
+- 관심 종목: TRACKING_INPUT_DIR 하위 `watch_YYYYMM.csv` (월별 파일)
+	- 예: `watch_202604.csv`
+	- `watch.csv` legacy 파일도 선택 조회 지원
 - 패턴 기록: TRACKING_INPUT_DIR 하위 RECORD_FILE_OPTIONS의 파일명
 
 ### 4.2 실행 산출물
@@ -76,7 +77,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 
 관심/기록 저장 메뉴:
 
-- tracking/watch.csv
+- tracking/watch_YYYYMM.csv
 - tracking/MA10_J_Break.csv 등 패턴 기록 파일
 
 ## 5. 핵심 동작
@@ -98,6 +99,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 - latest scan_result의 all_breakouts.csv 및 charts 폴더를 결합
 - 케이스별 정렬(강도순/코드순)과 필터(돌파율, 볼륨%) 적용
 - 차트 갤러리 및 썸네일 선택 제공
+- 확대(선택) 종목을 관심종목 파일로 바로 저장 가능
 
 streamlit-image-select가 없으면:
 
@@ -113,15 +115,24 @@ streamlit-image-select가 없으면:
 ### 5.5 관심종목/패턴 조회
 
 - 저장된 csv를 페이지 단위로 조회
-- 행 선택 후 동일 화면에서 차트 재조회
+- 행 선택 + 액션 버튼(차트/삭제) 방식
+- 관심종목 조회(5번):
+	- 월별 파일 선택 조회
+	- 차트에서 메모 필드 표시/수정/저장
+	- 긴 메모 스크롤 지원
+- 패턴조회(7번):
+	- 테이블 앞 5열 폭 축소, 메모 열 폭 확장
 - 이전/다음 봉 이동 지원
-- 선택 행 삭제 지원
 
 ### 5.6 보유 종목 조회
 
 - HOLDINGS_CSV를 읽어 현재가/수익률/이격도 계산
+- 보유 종목 추가(종목코드/종목명/매수가/수량/메모)
 - 테이블 선택 후 주봉/월봉 차트 조회
 - 보유 행 삭제 지원
+	- 삭제 시 관심종목으로 전송 가능(주봉/월봉, 분류, 메모)
+- 보유 CSV 메모 컬럼 자동 보강
+- 차트 표시 시 메모 조회/수정/저장 지원
 
 ## 6. 상태 관리
 
