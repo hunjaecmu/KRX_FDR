@@ -479,11 +479,22 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
             merged = new_df.copy()
         else:
             old_df = load_raw_daily(file_path)
-            if new_df.empty and not old_df.empty:
+            old_has_values = not old_df.dropna(how="all").empty
+            new_has_values = not new_df.dropna(how="all").empty
+
+            if not new_has_values and old_has_values:
                 print(f"[RAW][{mode}] {code} {name} 신규 데이터 없음")
                 return {"status": "empty", "rows": 0, "updated": False}
 
-            merged = pd.concat([old_df, new_df], ignore_index=True)
+            if old_has_values and new_has_values:
+                merged = pd.concat([old_df, new_df], ignore_index=True)
+            elif new_has_values:
+                merged = new_df.copy()
+            elif old_has_values:
+                merged = old_df.copy()
+            else:
+                merged = pd.DataFrame(columns=old_df.columns)
+
             merged = (
                 merged.sort_values("date")
                       .drop_duplicates(subset=["date"], keep="last")

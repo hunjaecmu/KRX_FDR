@@ -25,7 +25,6 @@ from config import (
     OUTPUT_DIR,
     TRACKING_INPUT_DIR,
     HOLDINGS_CSV,
-    INTEREST_WATCH_CSV,
     RECORD_FILE_OPTIONS,
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
@@ -377,6 +376,83 @@ def _record_label_to_filename(display_label: str) -> str:
     return dict(RECORD_FILE_OPTIONS).get(left_label, "MA10_W_Break.csv")
 
 
+def _interest_watch_month_token(ref_date: Optional[date] = None) -> str:
+    base = ref_date if ref_date is not None else date.today()
+    return f"{base.year:04d}{base.month:02d}"
+
+
+def _interest_watch_monthly_filename(month_token: str) -> str:
+    return f"watch_{str(month_token).strip()}.csv"
+
+
+def _interest_watch_monthly_path(month_token: Optional[str] = None) -> str:
+    token = str(month_token).strip() if month_token else _interest_watch_month_token()
+    return os.path.join(TRACKING_INPUT_DIR, _interest_watch_monthly_filename(token))
+
+
+def _parse_interest_watch_month_from_filename(filename: str) -> Optional[str]:
+    name = str(filename).strip()
+    m1 = re.match(r"^watch_(\d{6})\.csv$", name)
+    if m1:
+        return m1.group(1)
+    m2 = re.match(r"^(\d{6})\.csv$", name)
+    if m2:
+        return m2.group(1)
+    return None
+
+
+def _interest_watch_file_options(tracking_dir: str) -> list[tuple[str, str]]:
+    options: list[tuple[str, str]] = []
+    current_month = _interest_watch_month_token()
+    current_path = _interest_watch_monthly_path(current_month)
+    options.append((f"{current_month} (현재월)", current_path))
+
+    if not os.path.isdir(tracking_dir):
+        return options
+
+    month_map: dict[str, str] = {}
+    legacy_path = None
+    for fname in os.listdir(tracking_dir):
+        full_path = os.path.join(tracking_dir, fname)
+        if not os.path.isfile(full_path):
+            continue
+        if str(fname).lower() == "watch.csv":
+            legacy_path = full_path
+            continue
+
+        month_token = _parse_interest_watch_month_from_filename(str(fname))
+        if month_token:
+            month_map[month_token] = full_path
+
+    for month_token in sorted(month_map.keys(), reverse=True):
+        display = f"{month_token}"
+        if month_token == current_month:
+            display = f"{month_token} (현재월)"
+        pair = (display, month_map[month_token])
+        if pair not in options:
+            options.append(pair)
+
+    if legacy_path:
+        options.append(("legacy watch.csv", legacy_path))
+
+    return options
+
+
+def _infer_timeframe_from_case_key(case_key: str) -> str:
+    return "weekly" if str(case_key).strip().startswith("weekly_") else "monthly"
+
+
+def _default_classification_from_case_key(case_key: str) -> str:
+    key = str(case_key)
+    if "ma10" in key:
+        return "10이평"
+    if "ma120" in key:
+        return "120이평"
+    if "ma180" in key:
+        return "180이평"
+    return "240이평"
+
+
 def _render_stock_lookup_panel(save_mode: str) -> None:
     # save_mode: "interest" or "record"
     panel_title = "관심종목 저장" if save_mode == "interest" else "기록 데이터 저장"
@@ -553,7 +629,8 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                     help="tracking 폴더 아래 고정 파일명 중 하나로 저장됩니다.",
                 )
             else:
-                st.caption(f"관심 저장 파일: {os.path.basename(INTEREST_WATCH_CSV)}")
+                current_watch_path = _interest_watch_monthly_path()
+                st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
 
         if st.button("현재 차트 데이터 저장", use_container_width=True, key=f"{prefix}_save"):
             try:
@@ -575,7 +652,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
                 tracking_dir = TRACKING_INPUT_DIR
                 if save_mode == "interest":
-                    target_file = INTEREST_WATCH_CSV
+                    target_file = _interest_watch_monthly_path()
                 else:
                     target_file = os.path.join(tracking_dir, _record_label_to_filename(str(record_file_label)))
 
@@ -588,11 +665,22 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
 
 def _render_interest_watch_data() -> None:
-    st.caption("tracking 폴더의 관심 종목 CSV 데이터를 조회합니다.")
+    st.caption("tracking 폴더의 월별 관심 종목 CSV 데이터를 조회합니다.")
     tracking_dir = TRACKING_INPUT_DIR
     os.makedirs(tracking_dir, exist_ok=True)
 
-    watch_path = INTEREST_WATCH_CSV
+    watch_options = _interest_watch_file_options(tracking_dir)
+    watch_option_labels = [x[0] for x in watch_options]
+    watch_option_map = {label: path for label, path in watch_options}
+
+    default_label = next((label for label, _ in watch_options if "(현재월)" in label), watch_option_labels[0])
+    selected_watch_label = st.selectbox(
+        "관심 파일 선택",
+        options=watch_option_labels,
+        index=watch_option_labels.index(default_label),
+        key="watch_file_select",
+    )
+    watch_path = watch_option_map[selected_watch_label]
     st.markdown("#### 관심 데이터")
     if os.path.isfile(watch_path):
         try:
@@ -600,17 +688,17 @@ def _render_interest_watch_data() -> None:
             st.caption(f"파일: {watch_path}")
 
             if wdf.empty:
-                st.info("watch.csv 데이터가 비어 있습니다.")
+                st.info("선택한 관심 파일 데이터가 비어 있습니다.")
                 return
 
             # Normalize required fields saved by menu 4.
             wdf = wdf.fillna("")
             wdf = wdf.reset_index(drop=True)
             if "종목코드" not in wdf.columns:
-                st.error("watch.csv에 종목코드 컬럼이 없습니다.")
+                st.error("선택한 관심 파일에 종목코드 컬럼이 없습니다.")
                 return
             if "종목명" not in wdf.columns:
-                st.error("watch.csv에 종목명 컬럼이 없습니다.")
+                st.error("선택한 관심 파일에 종목명 컬럼이 없습니다.")
                 return
 
             wdf["종목코드"] = (
@@ -653,41 +741,14 @@ def _render_interest_watch_data() -> None:
             end = min(start + page_size, total_rows)
             page_df = wdf.iloc[start:end].copy().reset_index(drop=True)
 
-            header = st.columns([0.6, 1.6, 1.0, 0.9, 1.1, 1.1, 1.1, 0.9, 0.9, 1.8, 0.9])
-            header[0].markdown("**No**")
-            header[1].markdown("**종목명(클릭)**")
-            header[2].markdown("**종목코드**")
-            header[3].markdown("**봉타입**")
-            header[4].markdown("**기준봉 날짜**")
-            header[5].markdown("**기준봉 종가**")
-            header[6].markdown("**최신 종가**")
-            header[7].markdown("**변화율**")
-            header[8].markdown("**분류**")
-            header[9].markdown("**메모**")
-            header[10].markdown("**삭제**")
-
             selected_key = "watch_selected_row"
+            selected_idx_key = "watch_selected_table_idx"
+
+            table_rows = []
             for i, row in page_df.iterrows():
                 real_idx = start + i
-                cols = st.columns([0.6, 1.6, 1.0, 0.9, 1.1, 1.1, 1.1, 0.9, 0.9, 1.8, 0.9])
-                cols[0].markdown(str(real_idx + 1))
-
-                button_label = str(row.get("종목명", "")).strip() or str(row.get("종목코드", "")).strip()
-                if cols[1].button(button_label, key=f"watch_pick_{real_idx}", use_container_width=True):
-                    st.session_state[selected_key] = {
-                        "code": str(row.get("종목코드", "")).strip().zfill(6),
-                        "name": str(row.get("종목명", "")).strip(),
-                        "date": str(row.get("종목의 마지막 봉의 날짜", "")).strip(),
-                        "timeframe_text": str(row.get("주봉 or 월봉 선택", "")).strip(),
-                    }
-
-                cols[2].markdown(str(row.get("종목코드", "")))
                 tf_text = str(row.get("주봉 or 월봉 선택", "")).strip()
-                cols[3].markdown(tf_text)
-
                 anchor_date_text = str(row.get("종목의 마지막 봉의 날짜", "")).strip()
-                cols[4].markdown(anchor_date_text)
-
                 timeframe_value = "weekly" if "주" in tf_text or tf_text.lower().startswith("w") else "monthly"
                 code_value = str(row.get("종목코드", "")).strip().zfill(6)
 
@@ -699,22 +760,94 @@ def _render_interest_watch_data() -> None:
                 if anchor_close is not None and latest_close is not None and float(anchor_close) != 0.0:
                     change_pct = ((float(latest_close) / float(anchor_close)) - 1.0) * 100.0
 
-                cols[5].markdown("" if anchor_close is None else f"{anchor_close:,.0f}")
-                cols[6].markdown("" if latest_close is None else f"{latest_close:,.0f}")
-                if change_pct is None:
-                    cols[7].markdown("")
-                elif change_pct > 0:
-                    cols[7].markdown(f"<span style='color:#d32f2f;'>{change_pct:.2f}%</span>", unsafe_allow_html=True)
-                elif change_pct < 0:
-                    cols[7].markdown(f"<span style='color:#1565c0;'>{change_pct:.2f}%</span>", unsafe_allow_html=True)
-                else:
-                    cols[7].markdown(f"{change_pct:.2f}%")
+                table_rows.append(
+                    {
+                        "종목명": str(row.get("종목명", "")).strip(),
+                        "종목코드": code_value,
+                        "봉타입": tf_text,
+                        "기준봉 날짜": anchor_date_text,
+                        "기준봉 종가": anchor_close,
+                        "최신 종가": latest_close,
+                        "변화율": change_pct,
+                        "분류": str(row.get("분류", "")),
+                        "메모": str(row.get("메모", "")),
+                        "__raw_index": int(real_idx),
+                    }
+                )
 
-                cols[8].markdown(str(row.get("분류", "")))
-                cols[9].markdown(str(row.get("메모", "")))
-                if cols[10].button("삭제", key=f"watch_del_{real_idx}", use_container_width=True):
-                    st.session_state["watch_delete_pending_idx"] = int(real_idx)
-                    st.session_state["watch_delete_pending_name"] = str(row.get("종목명", "")).strip()
+            action_df = pd.DataFrame(table_rows)
+            action_view = action_df.drop(columns=["__raw_index"]).copy()
+            action_view.index = action_view.index + start + 1
+            action_view.index.name = "No"
+
+            def _watch_pos_neg_color(v):
+                if pd.isna(v):
+                    return ""
+                if float(v) > 0:
+                    return "color: #d32f2f;"
+                if float(v) < 0:
+                    return "color: #1565c0;"
+                return ""
+
+            styled_action = (
+                action_view.style
+                .format(
+                    {
+                        "기준봉 종가": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
+                        "최신 종가": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
+                        "변화율": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
+                    }
+                )
+                .set_properties(subset=["기준봉 종가", "최신 종가", "변화율"], **{"text-align": "right"})
+                .set_properties(subset=["종목코드", "봉타입", "기준봉 날짜"], **{"text-align": "center"})
+                .map(_watch_pos_neg_color, subset=["변화율"])
+            )
+
+            selected_rows = []
+            try:
+                table_event = st.dataframe(
+                    styled_action,
+                    use_container_width=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="watch_action_table",
+                )
+                if table_event is not None and hasattr(table_event, "selection"):
+                    selected_rows = list(getattr(table_event.selection, "rows", []) or [])
+            except TypeError:
+                st.dataframe(styled_action, use_container_width=True)
+
+            c1, c2 = st.columns([1, 5])
+            with c1:
+                chart_clicked = st.button("차트", key="watch_action_chart", use_container_width=True)
+            with c2:
+                delete_clicked = st.button("삭제", key="watch_action_delete", use_container_width=True)
+
+            if selected_rows:
+                st.session_state[selected_idx_key] = int(start + int(selected_rows[0]))
+
+            selected_global_idx = st.session_state.get(selected_idx_key)
+            if selected_global_idx is not None and 0 <= int(selected_global_idx) < len(wdf):
+                chosen = wdf.iloc[int(selected_global_idx)]
+                chosen_name = str(chosen.get("종목명", "")).strip() or str(chosen.get("종목코드", "")).strip()
+                st.caption(f"선택된 종목: {chosen_name} ({str(chosen.get('종목코드', '')).zfill(6)})")
+
+                if chart_clicked:
+                    st.session_state[selected_key] = {
+                        "code": str(chosen.get("종목코드", "")).strip().zfill(6),
+                        "name": str(chosen.get("종목명", "")).strip(),
+                        "date": str(chosen.get("종목의 마지막 봉의 날짜", "")).strip(),
+                        "timeframe_text": str(chosen.get("주봉 or 월봉 선택", "")).strip(),
+                        "memo": str(chosen.get("메모", "")),
+                        "row_idx": int(selected_global_idx),
+                    }
+
+                if delete_clicked:
+                    st.session_state["watch_delete_pending_idx"] = int(selected_global_idx)
+                    st.session_state["watch_delete_pending_name"] = chosen_name
+            else:
+                if chart_clicked or delete_clicked:
+                    st.warning("관심종목 데이터 테이블에서 먼저 종목 1개를 선택하세요.")
 
             pending_idx = st.session_state.get("watch_delete_pending_idx")
             if pending_idx is not None:
@@ -745,7 +878,7 @@ def _render_interest_watch_data() -> None:
 
             picked = st.session_state.get(selected_key)
             if not picked:
-                st.info("종목명을 클릭하면 아래에 차트가 표시됩니다.")
+                st.info("종목을 선택하고 차트 버튼을 누르세요")
                 return
 
             timeframe_text = str(picked.get("timeframe_text", "")).strip()
@@ -768,24 +901,88 @@ def _render_interest_watch_data() -> None:
                 }
 
             state = st.session_state[chart_state_key]
-            # Reset chart state when user picks another stock/timeframe.
             if (
                 str(state.get("code")) != str(picked.get("code", "")).zfill(6)
                 or str(state.get("timeframe")) != timeframe
+                or str(state.get("origin_target_date")) != pd.to_datetime(target_date).strftime("%Y-%m-%d")
             ):
                 state = {
                     "code": str(picked.get("code", "")).zfill(6),
                     "name": str(picked.get("name", "")),
                     "timeframe": timeframe,
                     "target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
+                    "origin_target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
                 }
                 st.session_state[chart_state_key] = state
 
-            mv1, mv2, _ = st.columns([1, 1, 4])
+            memo_row_idx = picked.get("row_idx")
+            memo_state_key = "watch_chart_memo_text"
+            memo_row_state_key = "watch_chart_memo_row_idx"
+            if (
+                memo_state_key not in st.session_state
+                or st.session_state.get(memo_row_state_key) != memo_row_idx
+            ):
+                default_memo = ""
+                if isinstance(memo_row_idx, int) and 0 <= int(memo_row_idx) < len(wdf):
+                    default_memo = str(wdf.iloc[int(memo_row_idx)].get("메모", ""))
+                else:
+                    default_memo = str(picked.get("memo", ""))
+                st.session_state[memo_state_key] = default_memo
+                st.session_state[memo_row_state_key] = memo_row_idx
+
+            mv1, mv2, mv3, mv4, mv5 = st.columns([1, 1, 1, 4, 1])
             with mv1:
                 move_prev = st.button("이전 1봉", key="watch_chart_prev", use_container_width=True)
             with mv2:
+                move_home = st.button("처음위치로", key="watch_chart_home", use_container_width=True)
+            with mv3:
                 move_next = st.button("다음 1봉", key="watch_chart_next", use_container_width=True)
+            with mv4:
+                memo_input = st.text_area(
+                    "메모",
+                    key=memo_state_key,
+                    label_visibility="collapsed",
+                    placeholder="메모를 입력하세요",
+                    height=68,
+                )
+            with mv5:
+                memo_save_clicked = st.button("메모저장", key="watch_chart_memo_save", use_container_width=True)
+
+            st.markdown(
+                """
+<style>
+div[data-testid="stTextArea"] textarea {
+    white-space: pre;
+    overflow-x: auto;
+    overflow-y: auto;
+    overflow-wrap: normal;
+    word-break: keep-all;
+}
+</style>
+""",
+                unsafe_allow_html=True,
+            )
+
+            if memo_save_clicked:
+                try:
+                    if "메모" not in wdf.columns:
+                        wdf["메모"] = ""
+
+                    if not (isinstance(memo_row_idx, int) and 0 <= int(memo_row_idx) < len(wdf)):
+                        st.error("메모 저장 대상 행을 찾지 못했습니다.")
+                    else:
+                        wdf.loc[int(memo_row_idx), "메모"] = str(memo_input)
+                        wdf.to_csv(watch_path, index=False, encoding="utf-8-sig")
+                        if isinstance(picked, dict):
+                            picked["memo"] = str(memo_input)
+                            st.session_state[selected_key] = picked
+                        st.success("메모 저장 완료")
+                except Exception as memo_e:
+                    st.error(f"메모 저장 실패: {memo_e}")
+
+            if move_home:
+                state["target_date"] = str(state.get("origin_target_date", state.get("target_date")))
+                st.session_state[chart_state_key] = state
 
             if move_prev or move_next:
                 try:
@@ -816,7 +1013,8 @@ def _render_interest_watch_data() -> None:
                     fig=fig,
                     code=str(state["code"]),
                     timeframe=str(state["timeframe"]),
-                    target_date_text=str(state["target_date"]),
+                    current_target_date_text=str(state["target_date"]),
+                    origin_target_date_text=str(state.get("origin_target_date", state["target_date"])),
                 )
 
                 st.success(
@@ -827,9 +1025,9 @@ def _render_interest_watch_data() -> None:
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
-            st.error(f"watch.csv 조회 실패: {e}")
+            st.error(f"관심 파일 조회 실패: {e}")
     else:
-        st.info("watch.csv 파일이 없습니다.")
+        st.info("선택한 관심 파일이 아직 생성되지 않았습니다.")
 
 
 def _render_saved_pattern_data() -> None:
@@ -930,11 +1128,21 @@ def _render_saved_pattern_data() -> None:
             table_df.index = table_df.index + start + 1
             table_df.index.name = "No"
 
+            pattern_table_column_config = {
+                "종목명": st.column_config.TextColumn(width="small"),
+                "종목코드": st.column_config.TextColumn(width="small"),
+                "주봉 or 월봉 선택": st.column_config.TextColumn(width="small"),
+                "종목의 마지막 봉의 날짜": st.column_config.TextColumn(width="small"),
+                "분류": st.column_config.TextColumn(width="small"),
+                "메모": st.column_config.TextColumn(width="large"),
+            }
+
             selected_rows = []
             try:
                 table_event = st.dataframe(
                     table_df,
                     use_container_width=True,
+                    column_config=pattern_table_column_config,
                     on_select="rerun",
                     selection_mode="single-row",
                     key="pattern_action_table",
@@ -942,7 +1150,11 @@ def _render_saved_pattern_data() -> None:
                 if table_event is not None and hasattr(table_event, "selection"):
                     selected_rows = list(getattr(table_event.selection, "rows", []) or [])
             except TypeError:
-                st.dataframe(table_df, use_container_width=True)
+                st.dataframe(
+                    table_df,
+                    use_container_width=True,
+                    column_config=pattern_table_column_config,
+                )
 
             c1, c2 = st.columns([1, 5])
             with c1:
@@ -1071,6 +1283,7 @@ HOLDINGS_CODE_CANDIDATES = ["code", "종목코드", "티커", "ticker"]
 HOLDINGS_NAME_CANDIDATES = ["name", "종목명"]
 HOLDINGS_BUY_PRICE_CANDIDATES = ["buy_price", "매수가", "매입가"]
 HOLDINGS_QUANTITY_CANDIDATES = ["quantity", "보유수량", "수량", "shares"]
+HOLDINGS_MEMO_CANDIDATES = ["memo", "메모", "note", "비고"]
 
 
 def _pick_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -1278,6 +1491,7 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
     name_col = _pick_column(raw_df, HOLDINGS_NAME_CANDIDATES)
     buy_col = _pick_column(raw_df, HOLDINGS_BUY_PRICE_CANDIDATES)
     qty_col = _pick_column(raw_df, HOLDINGS_QUANTITY_CANDIDATES)
+    memo_col = _pick_column(raw_df, HOLDINGS_MEMO_CANDIDATES)
 
     if buy_col is None:
         raise ValueError("holdings.csv에 매수가 컬럼(buy_price/매수가/매입가)이 없습니다.")
@@ -1290,6 +1504,7 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
     work["종목명"] = raw_df[name_col].astype(str).str.strip() if name_col else ""
     work["매수가"] = _to_number_series(raw_df[buy_col])
     work["보유수량"] = _to_number_series(raw_df[qty_col])
+    work["메모"] = raw_df[memo_col].astype(str) if memo_col else ""
     work = work[work["종목코드"].str.match(r"^\d{6}$", na=False)].copy()
     work = work.reset_index(drop=True)
 
@@ -1313,6 +1528,7 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
             {
                 "종목코드": str(row["종목코드"]),
                 "종목명": str(row["종목명"]),
+                "메모": str(row.get("메모", "")),
                 "__raw_index": int(row["__raw_index"]),
                 "가격일자": price_date,
                 "매수가": float(buy_price) if pd.notna(buy_price) else None,
@@ -1351,14 +1567,107 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _load_holdings_source_df(holdings_path: str) -> pd.DataFrame:
+    if os.path.isfile(holdings_path):
+        try:
+            hdf = pd.read_csv(holdings_path, dtype=str)
+            return hdf.fillna("")
+        except Exception:
+            pass
+    return pd.DataFrame(columns=["종목코드", "종목명", "매수가", "보유수량", "메모"])
+
+
+def _add_holding_row(
+    holdings_path: str,
+    code: str,
+    name: str,
+    buy_price_text: str,
+    quantity_text: str,
+    memo_text: str,
+) -> None:
+    hdf = _load_holdings_source_df(holdings_path)
+
+    code_col = _pick_column(hdf, HOLDINGS_CODE_CANDIDATES) or "종목코드"
+    name_col = _pick_column(hdf, HOLDINGS_NAME_CANDIDATES) or "종목명"
+    buy_col = _pick_column(hdf, HOLDINGS_BUY_PRICE_CANDIDATES) or "매수가"
+    qty_col = _pick_column(hdf, HOLDINGS_QUANTITY_CANDIDATES) or "보유수량"
+    memo_col = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES) or "메모"
+
+    for col in [code_col, name_col, buy_col, qty_col, memo_col]:
+        if col not in hdf.columns:
+            hdf[col] = ""
+
+    new_row = {col: "" for col in hdf.columns}
+    new_row[code_col] = str(code).strip().zfill(6)
+    new_row[name_col] = str(name).strip()
+    new_row[buy_col] = str(buy_price_text).strip()
+    new_row[qty_col] = str(quantity_text).strip()
+    new_row[memo_col] = str(memo_text)
+
+    out_df = pd.concat([hdf, pd.DataFrame([new_row])], ignore_index=True)
+    out_df.to_csv(holdings_path, index=False, encoding="utf-8-sig")
+
+
 def _render_output_holdings_data() -> None:
     st.caption(f"{HOLDINGS_CSV} 데이터를 조회합니다.")
     holdings_path = HOLDINGS_CSV
+    os.makedirs(os.path.dirname(holdings_path), exist_ok=True)
+
+    st.markdown("#### 보유 종목 추가")
+    add_c1, add_c2, add_c3, add_c4, add_c5 = st.columns([1.1, 1.3, 1.0, 0.9, 2.2])
+    with add_c1:
+        add_code = st.text_input("종목코드", value="", max_chars=6, key="holdings_add_code")
+    with add_c2:
+        add_name = st.text_input("종목명", value="", key="holdings_add_name")
+    with add_c3:
+        add_buy = st.text_input("매수가", value="", key="holdings_add_buy")
+    with add_c4:
+        add_qty = st.text_input("수량", value="", key="holdings_add_qty")
+    with add_c5:
+        add_memo = st.text_input("메모", value="", key="holdings_add_memo")
+
+    if st.button("보유 종목 추가", key="holdings_add_submit", use_container_width=True):
+        try:
+            code = str(add_code).strip().replace(" ", "").zfill(6)
+            if not re.fullmatch(r"\d{6}", code):
+                raise ValueError("종목코드는 6자리 숫자로 입력하세요.")
+
+            buy_val = pd.to_numeric(str(add_buy).strip().replace(",", ""), errors="coerce")
+            qty_val = pd.to_numeric(str(add_qty).strip().replace(",", ""), errors="coerce")
+            if pd.isna(buy_val) or float(buy_val) <= 0:
+                raise ValueError("매수가는 0보다 큰 숫자로 입력하세요.")
+            if pd.isna(qty_val) or float(qty_val) <= 0:
+                raise ValueError("수량은 0보다 큰 숫자로 입력하세요.")
+
+            resolved_name = str(add_name).strip()
+            if not resolved_name:
+                master = get_master_table()
+                if not master.empty and {"code", "name"}.issubset(set(master.columns)):
+                    hit = master[master["code"].astype(str).str.zfill(6) == code]
+                    if not hit.empty:
+                        resolved_name = str(hit.iloc[0].get("name", "")).strip()
+
+            _add_holding_row(
+                holdings_path=holdings_path,
+                code=code,
+                name=resolved_name,
+                buy_price_text=f"{float(buy_val):.2f}",
+                quantity_text=f"{float(qty_val):.4f}",
+                memo_text=str(add_memo),
+            )
+            st.success("보유 종목이 추가되었습니다.")
+            st.rerun()
+        except Exception as add_e:
+            st.error(f"추가 실패: {add_e}")
 
     st.markdown("#### 보유 종목 데이터")
     if os.path.isfile(holdings_path):
         try:
             hdf = pd.read_csv(holdings_path, dtype=str)
+            memo_col_name = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES)
+            if memo_col_name is None:
+                hdf["메모"] = ""
+                hdf.to_csv(holdings_path, index=False, encoding="utf-8-sig")
             st.caption(f"파일: {holdings_path}")
 
             perf_df = _build_holdings_performance_df(hdf)
@@ -1433,6 +1742,7 @@ def _render_output_holdings_data() -> None:
                 "이격도(주)",
                 "월봉 10이평",
                 "이격도(월)",
+                "메모",
                 "__raw_index",
             ]].copy()
             action_df = action_df.reset_index(drop=True)
@@ -1472,11 +1782,17 @@ def _render_output_holdings_data() -> None:
                 .map(_pos_neg_color, subset=["수익률", "이격도(주)", "이격도(월)"])
             )
 
+            holdings_column_config = {
+                "메모": st.column_config.TextColumn(width="large"),
+            }
+
             selected_rows = []
             try:
                 table_event = st.dataframe(
                     styled_action,
-                    use_container_width=True,
+                    use_container_width=False,
+                    width=1600,
+                    column_config=holdings_column_config,
                     on_select="rerun",
                     selection_mode="single-row",
                     key="holdings_action_table",
@@ -1484,7 +1800,12 @@ def _render_output_holdings_data() -> None:
                 if table_event is not None and hasattr(table_event, "selection"):
                     selected_rows = list(getattr(table_event.selection, "rows", []) or [])
             except TypeError:
-                st.dataframe(styled_action, use_container_width=True)
+                st.dataframe(
+                    styled_action,
+                    use_container_width=False,
+                    width=1600,
+                    column_config=holdings_column_config,
+                )
 
             btn1, btn2, btn3 = st.columns([1, 1, 4])
             with btn1:
@@ -1507,11 +1828,15 @@ def _render_output_holdings_data() -> None:
                         "code": str(chosen.get("종목코드", "")).strip().zfill(6),
                         "name": chosen_name,
                         "buy_price": float(chosen_buy_price) if pd.notna(chosen_buy_price) else None,
+                        "memo": str(chosen.get("메모", "")),
+                        "raw_index": int(chosen.get("__raw_index")),
                     }
 
                 if delete_clicked:
                     st.session_state["holdings_delete_pending_raw"] = int(chosen.get("__raw_index"))
                     st.session_state["holdings_delete_pending_name"] = chosen_name
+                    st.session_state["holdings_delete_pending_code"] = str(chosen.get("종목코드", "")).strip().zfill(6)
+                    st.session_state["holdings_delete_pending_memo"] = str(chosen.get("메모", ""))
             else:
                 if chart_clicked or delete_clicked:
                     st.warning("보유종목 데이터 테이블에서 먼저 종목 1개를 선택하세요.")
@@ -1519,6 +1844,37 @@ def _render_output_holdings_data() -> None:
             pending_raw = st.session_state.get("holdings_delete_pending_raw")
             if pending_raw is not None:
                 pending_name = st.session_state.get("holdings_delete_pending_name", "")
+                pending_code = str(st.session_state.get("holdings_delete_pending_code", "")).strip().zfill(6)
+                pending_memo = str(st.session_state.get("holdings_delete_pending_memo", ""))
+
+                send_cols = st.columns([1.4, 1.1, 1.1, 3.4])
+                with send_cols[0]:
+                    send_to_interest = st.checkbox(
+                        "관심종목으로 보내기",
+                        value=True,
+                        key="holdings_delete_send_interest",
+                    )
+                with send_cols[1]:
+                    send_timeframe_label = st.selectbox(
+                        "봉 타입",
+                        options=["주봉", "월봉"],
+                        index=0,
+                        key="holdings_delete_send_timeframe",
+                    )
+                with send_cols[2]:
+                    send_classification = st.selectbox(
+                        "분류",
+                        options=["10이평", "120이평", "180이평", "240이평"],
+                        index=0,
+                        key="holdings_delete_send_classification",
+                    )
+                with send_cols[3]:
+                    send_memo = st.text_input(
+                        "관심 메모",
+                        value=pending_memo,
+                        key="holdings_delete_send_memo",
+                    )
+
                 dc1, dc2, dc3 = st.columns([4, 1, 1])
                 with dc1:
                     st.warning(f"삭제하시겠습니까? {'(' + pending_name + ')' if pending_name else ''}")
@@ -1526,11 +1882,32 @@ def _render_output_holdings_data() -> None:
                     if st.button("예", key="holdings_delete_yes", use_container_width=True):
                         try:
                             raw_idx = int(pending_raw)
+
+                            if send_to_interest:
+                                send_timeframe = "weekly" if send_timeframe_label == "주봉" else "monthly"
+                                snap_date, snap_close = _extract_last_bar_snapshot(
+                                    code=pending_code,
+                                    timeframe=send_timeframe,
+                                    target_date=pd.Timestamp(date.today()),
+                                )
+                                interest_row = {
+                                    "종목명": pending_name,
+                                    "종목코드": pending_code,
+                                    "종목의 마지막 봉의 날짜": snap_date.strftime("%Y-%m-%d"),
+                                    "주봉 or 월봉 선택": "주봉" if send_timeframe == "weekly" else "월봉",
+                                    "현시점 종가": f"{snap_close:.2f}",
+                                    "분류": send_classification,
+                                    "메모": str(send_memo),
+                                }
+                                _append_tracking_row(_interest_watch_monthly_path(), interest_row)
+
                             if 0 <= raw_idx < len(hdf):
                                 updated_hdf = hdf.drop(index=raw_idx).reset_index(drop=True)
                                 updated_hdf.to_csv(holdings_path, index=False, encoding="utf-8-sig")
                             st.session_state.pop("holdings_delete_pending_raw", None)
                             st.session_state.pop("holdings_delete_pending_name", None)
+                            st.session_state.pop("holdings_delete_pending_code", None)
+                            st.session_state.pop("holdings_delete_pending_memo", None)
                             st.rerun()
                         except Exception as del_e:
                             st.error(f"삭제 실패: {del_e}")
@@ -1538,6 +1915,8 @@ def _render_output_holdings_data() -> None:
                     if st.button("아니오", key="holdings_delete_no", use_container_width=True):
                         st.session_state.pop("holdings_delete_pending_raw", None)
                         st.session_state.pop("holdings_delete_pending_name", None)
+                        st.session_state.pop("holdings_delete_pending_code", None)
+                        st.session_state.pop("holdings_delete_pending_memo", None)
                         st.rerun()
 
             st.markdown("---")
@@ -1578,11 +1957,73 @@ def _render_output_holdings_data() -> None:
                     }
                     st.session_state[chart_state_key] = state
 
-                mv1, mv2, _ = st.columns([1, 1, 4])
+                memo_row_idx = picked.get("raw_index")
+                memo_state_key = "holdings_chart_memo_text"
+                memo_row_state_key = "holdings_chart_memo_row_idx"
+                if (
+                    memo_state_key not in st.session_state
+                    or st.session_state.get(memo_row_state_key) != memo_row_idx
+                ):
+                    default_memo = ""
+                    if isinstance(memo_row_idx, int) and 0 <= int(memo_row_idx) < len(hdf):
+                        memo_col_name = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES)
+                        if memo_col_name is not None:
+                            default_memo = str(hdf.iloc[int(memo_row_idx)].get(memo_col_name, ""))
+                        else:
+                            default_memo = str(picked.get("memo", ""))
+                    else:
+                        default_memo = str(picked.get("memo", ""))
+                    st.session_state[memo_state_key] = default_memo
+                    st.session_state[memo_row_state_key] = memo_row_idx
+
+                mv1, mv2, mv3, mv4 = st.columns([1, 1, 4, 1])
                 with mv1:
                     move_prev = st.button("이전 1봉", key="holdings_chart_prev", use_container_width=True)
                 with mv2:
                     move_next = st.button("다음 1봉", key="holdings_chart_next", use_container_width=True)
+                with mv3:
+                    memo_input = st.text_area(
+                        "메모",
+                        key=memo_state_key,
+                        label_visibility="collapsed",
+                        placeholder="메모를 입력하세요",
+                        height=68,
+                    )
+                with mv4:
+                    memo_save_clicked = st.button("메모저장", key="holdings_chart_memo_save", use_container_width=True)
+
+                if memo_save_clicked:
+                    try:
+                        memo_col_name = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES) or "메모"
+                        if memo_col_name not in hdf.columns:
+                            hdf[memo_col_name] = ""
+
+                        if not (isinstance(memo_row_idx, int) and 0 <= int(memo_row_idx) < len(hdf)):
+                            st.error("메모 저장 대상 행을 찾지 못했습니다.")
+                        else:
+                            hdf.loc[int(memo_row_idx), memo_col_name] = str(memo_input)
+                            hdf.to_csv(holdings_path, index=False, encoding="utf-8-sig")
+                            if isinstance(picked, dict):
+                                picked["memo"] = str(memo_input)
+                                st.session_state[pick_key] = picked
+                            st.success("메모 저장 완료")
+                    except Exception as memo_e:
+                        st.error(f"메모 저장 실패: {memo_e}")
+
+                st.markdown(
+                    """
+<style>
+div[data-testid="stTextArea"] textarea {
+    white-space: pre;
+    overflow-x: auto;
+    overflow-y: auto;
+    overflow-wrap: normal;
+    word-break: keep-all;
+}
+</style>
+""",
+                    unsafe_allow_html=True,
+                )
 
                 if move_prev or move_next:
                     try:
@@ -1970,6 +2411,7 @@ def _render_case_gallery(
 
     idx_key = f"gallery_idx_{case_key}"
     gallery_sig_key = f"gallery_sig_{case_key}"
+    thumb_selected_key = f"thumb_selected_idx_{case_key}"
     current_sig = (
         sort_by,
         max_breakout_pct,
@@ -1982,9 +2424,12 @@ def _render_case_gallery(
     if st.session_state.get(gallery_sig_key) != current_sig:
         st.session_state[idx_key] = 0
         st.session_state[gallery_sig_key] = current_sig
+        st.session_state[thumb_selected_key] = 0
 
     if idx_key not in st.session_state or st.session_state[idx_key] >= len(gallery_items):
         st.session_state[idx_key] = 0
+    if thumb_selected_key not in st.session_state or int(st.session_state[thumb_selected_key]) >= len(gallery_items):
+        st.session_state[thumb_selected_key] = int(st.session_state[idx_key])
 
     nav1, nav2, nav3 = st.columns([1, 1, 4])
     with nav1:
@@ -2013,6 +2458,67 @@ def _render_case_gallery(
         f"돌파율 {float(selected.get('breakout_pct', 0.0)):.2f}% | {vol_text}"
     )
 
+    st.markdown("#### 관심종목 저장")
+    save_col1, save_col2 = st.columns([1.1, 1.9])
+    classification_options = ["10이평", "120이평", "180이평", "240이평"]
+    default_classification = _default_classification_from_case_key(case_key)
+    default_classification_idx = (
+        classification_options.index(default_classification)
+        if default_classification in classification_options
+        else 0
+    )
+    with save_col1:
+        classification = st.selectbox(
+            "분류",
+            options=classification_options,
+            index=default_classification_idx,
+            key=f"review_interest_classification_{case_key}",
+        )
+    with save_col2:
+        memo_text = st.text_input(
+            "메모",
+            value="",
+            key=f"review_interest_memo_{case_key}",
+        )
+        current_watch_path = _interest_watch_monthly_path()
+        st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
+
+    can_save = bool(code_text)
+    if not can_save:
+        st.warning("종목코드가 없어 저장할 수 없습니다.")
+
+    if st.button(
+        "현재 확대 종목 관심저장",
+        use_container_width=True,
+        key=f"review_interest_save_{case_key}",
+        disabled=not can_save,
+    ):
+        try:
+            timeframe = _infer_timeframe_from_case_key(case_key)
+            target_date_text = str(selected.get("date", "")).strip()
+            target_date = pd.to_datetime(target_date_text) if target_date_text else pd.Timestamp(date.today())
+
+            snap_date, snap_close = _extract_last_bar_snapshot(
+                code=code_text,
+                timeframe=timeframe,
+                target_date=target_date,
+            )
+
+            row = {
+                "종목명": name_text,
+                "종목코드": code_text,
+                "종목의 마지막 봉의 날짜": snap_date.strftime("%Y-%m-%d"),
+                "주봉 or 월봉 선택": "주봉" if timeframe == "weekly" else "월봉",
+                "현시점 종가": f"{snap_close:.2f}",
+                "분류": classification,
+                "메모": memo_text,
+            }
+            target_watch_path = _interest_watch_monthly_path()
+            _append_tracking_row(target_watch_path, row)
+            st.success(f"저장 완료: {target_watch_path}")
+        except Exception as save_e:
+            st.error(f"저장 실패: {save_e}")
+
     thumb_items = gallery_items
     thumb_images = [item["image_path"] for item in thumb_items]
     thumb_captions = []
@@ -2026,6 +2532,9 @@ def _render_case_gallery(
 
     if thumb_images:
         current_thumb_index = min(max(int(st.session_state[idx_key]), 0), len(thumb_items) - 1)
+        if thumb_selected_key not in st.session_state:
+            st.session_state[thumb_selected_key] = current_thumb_index
+
         if IMAGE_SELECT_AVAILABLE:
             picked_thumb = image_select(
                 label="",
@@ -2039,13 +2548,15 @@ def _render_case_gallery(
             if picked_thumb is not None:
                 picked_thumb_index = int(picked_thumb)
                 if 0 <= picked_thumb_index < len(thumb_items):
-                    picked_idx = picked_thumb_index
-                else:
-                    picked_idx = current_thumb_index
-
-                if 0 <= picked_idx < len(gallery_items) and picked_idx != st.session_state[idx_key]:
-                    st.session_state[idx_key] = picked_idx
-                    st.rerun()
+                    last_thumb_index = int(st.session_state.get(thumb_selected_key, current_thumb_index))
+                    if picked_thumb_index != last_thumb_index:
+                        st.session_state[thumb_selected_key] = picked_thumb_index
+                        if picked_thumb_index != st.session_state[idx_key]:
+                            st.session_state[idx_key] = picked_thumb_index
+                            st.rerun()
+                    else:
+                        # Keep tracker aligned when navigation buttons moved the main index.
+                        st.session_state[thumb_selected_key] = current_thumb_index
         else:
             st.info("썸네일 선택 기능을 사용하려면 streamlit-image-select 패키지를 설치하세요.")
             picked_idx = st.selectbox(
@@ -2055,9 +2566,15 @@ def _render_case_gallery(
                 format_func=lambda i: thumb_captions[i],
                 key=f"img_pick_fallback_{case_key}",
             )
-            if 0 <= picked_idx < len(gallery_items) and picked_idx != st.session_state[idx_key]:
-                st.session_state[idx_key] = picked_idx
-                st.rerun()
+            last_thumb_index = int(st.session_state.get(thumb_selected_key, current_thumb_index))
+            if 0 <= picked_idx < len(gallery_items):
+                if int(picked_idx) != last_thumb_index:
+                    st.session_state[thumb_selected_key] = int(picked_idx)
+                    if int(picked_idx) != st.session_state[idx_key]:
+                        st.session_state[idx_key] = int(picked_idx)
+                        st.rerun()
+                else:
+                    st.session_state[thumb_selected_key] = current_thumb_index
 
 
 START_MENU = "시작화면"
@@ -2509,7 +3026,7 @@ with top_left:
             else:
                 st.warning("스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
         if selected_menu == "5. 관심종목 조회":
-            st.info("tracking 폴더의 관심 종목 데이터(watch.csv)를 조회합니다.")
+            st.info("tracking 폴더의 월별 관심 종목 데이터(예: watch_202604.csv)를 조회합니다.")
         if selected_menu == "6. 패턴 데이터 입력":
             st.info("4번과 동일 조회 화면에서 기록 데이터 저장을 지원합니다.")
         if selected_menu == "7. 패턴 데이터 조회":
