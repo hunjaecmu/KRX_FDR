@@ -402,6 +402,139 @@ def get_existing_last_date(file_path: str) -> Optional[str]:
         return None
 
 
+def get_existing_last_price_status(file_path: str) -> Optional[str]:
+    if not os.path.exists(file_path):
+        return None
+
+    try:
+        df = pd.read_csv(file_path)
+        if df.empty or "date" not in df.columns:
+            return None
+
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"])
+        if df.empty:
+            return None
+
+        if "price_status" not in df.columns:
+            return None
+
+        last_idx = df["date"].idxmax()
+        status = df.loc[last_idx, "price_status"]
+        if pd.isna(status):
+            return None
+
+        status = str(status).strip()
+        return status if status else None
+    except Exception:
+        return None
+
+
+def get_trailing_intraday_dates(file_path: str) -> List[str]:
+    """
+    마지막 저장일에서 과거로 거슬러 올라가며 연속된 '장중' 날짜를 수집.
+    예) [..., 2026-04-08(장중), 2026-04-09(장중)] -> ["2026-04-09", "2026-04-08"]
+    """
+    if not os.path.exists(file_path):
+        return []
+
+    try:
+        df = load_raw_daily(file_path)
+        if df.empty or "price_status" not in df.columns:
+            return []
+
+        df = (
+            df.sort_values("date")
+              .drop_duplicates(subset=["date"], keep="last")
+              .reset_index(drop=True)
+        )
+
+        targets: List[str] = []
+        for _, row in df.iloc[::-1].iterrows():
+            status = str(row.get("price_status", "")).strip()
+            if status == "장중":
+                targets.append(pd.to_datetime(row["date"]).strftime("%Y-%m-%d"))
+            else:
+                break
+
+        return targets
+    except Exception:
+        return []
+
+
+def repair_trailing_intraday_to_final(
+    code: str,
+    name: str,
+    file_path: str,
+    end_date: str,
+    run_meta: Dict[str, str],
+) -> Dict[str, int]:
+    """
+    마지막 저장일 기준 연속된 '장중' 구간 중 과거 날짜(< end_date)에 대해
+    일자를 하나씩 재조회해 종가 데이터를 덮어쓴다.
+    """
+    trailing = get_trailing_intraday_dates(file_path)
+    if not trailing:
+        return {"checked": 0, "repaired": 0}
+
+    # 오늘 날짜 장중 바는 장중 업데이트 루틴에서 처리하고,
+    # 과거 날짜의 장중 표기만 종가로 보정한다.
+    historical_targets = [d for d in trailing if d < end_date]
+    if not historical_targets:
+        return {"checked": len(trailing), "repaired": 0}
+
+    old_df = load_raw_daily(file_path)
+    if old_df.empty:
+        return {"checked": len(trailing), "repaired": 0}
+
+    final_meta = dict(run_meta)
+    final_meta["price_status"] = "종가"
+
+    repaired_rows = []
+    repaired_count = 0
+
+    # 가장 오래된 날짜부터 재적용하면 후속 결합 시 흐름이 단순하다.
+    for target_date in reversed(historical_targets):
+        try:
+            day_df = fetch_ohlcv_with_retry(
+                code=code,
+                start_date=target_date,
+                end_date=next_day(target_date),
+                metadata=final_meta,
+            )
+
+            if day_df.empty:
+                continue
+
+            day_df = day_df.copy()
+            day_df["date"] = pd.to_datetime(day_df["date"]).dt.normalize()
+            target_ts = pd.to_datetime(target_date)
+            day_df = day_df[day_df["date"] == target_ts]
+
+            if day_df.empty:
+                continue
+
+            repaired_rows.append(day_df)
+            repaired_count += 1
+            print(f"[RAW][REPAIR] {code} {name} {target_date} 장중 -> 종가 재조회 완료")
+        except Exception as e:
+            print(f"[RAW][REPAIR][WARN] {code} {name} {target_date} 재조회 실패: {e}")
+
+    if not repaired_rows:
+        return {"checked": len(trailing), "repaired": 0}
+
+    patch_df = pd.concat(repaired_rows, ignore_index=True)
+    merged = (
+        pd.concat([old_df, patch_df], ignore_index=True)
+          .sort_values("date")
+          .drop_duplicates(subset=["date"], keep="last")
+          .reset_index(drop=True)
+    )
+    save_raw_daily(file_path, merged)
+
+    return {"checked": len(trailing), "repaired": repaired_count}
+
+
 def raw_schema_needs_refresh(file_path: str) -> bool:
     if not os.path.exists(file_path):
         return False
@@ -460,17 +593,42 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
         start_date = initial_start_date()
         mode = "REFRESH"
     else:
+        repair_info = repair_trailing_intraday_to_final(
+            code=code,
+            name=name,
+            file_path=file_path,
+            end_date=end_date,
+            run_meta=run_meta,
+        )
+        if repair_info.get("repaired", 0) > 0:
+            print(
+                f"[RAW][REPAIR] {code} {name} trailing_intraday_checked={repair_info.get('checked', 0)} "
+                f"repaired={repair_info.get('repaired', 0)}"
+            )
+
         last_saved = get_existing_last_date(file_path)
         if last_saved is None:
             start_date = initial_start_date()
             mode = "INIT"
         else:
-            start_date = next_day(last_saved)
-            mode = "INCR"
+            last_price_status = get_existing_last_price_status(file_path)
 
-    if pd.to_datetime(start_date) > pd.to_datetime(end_date) and not force_full_refresh:
-        print(f"[RAW][SKIP] {code} {name} 이미 최신")
-        return {"status": "skip", "rows": 0, "updated": False}
+            # Skip only when today's bar is already finalized.
+            if last_saved == end_date and last_price_status == "종가":
+                print(f"[RAW][SKIP] {code} {name} 이미 최신(종가)")
+                return {"status": "skip", "rows": 0, "updated": False}
+
+            if pd.to_datetime(last_saved) > pd.to_datetime(end_date):
+                print(f"[RAW][SKIP] {code} {name} 저장 데이터 날짜가 오늘보다 미래")
+                return {"status": "skip", "rows": 0, "updated": False}
+
+            if last_saved == end_date and last_price_status == "장중":
+                # Refetch same-day bar to refresh intraday snapshot.
+                start_date = end_date
+                mode = "INCR"
+            else:
+                start_date = next_day(last_saved)
+                mode = "INCR"
 
     try:
         new_df = fetch_ohlcv_with_retry(code, start_date, end_date, metadata=run_meta)

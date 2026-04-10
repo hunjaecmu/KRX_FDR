@@ -69,7 +69,7 @@ def _render_live_log(live_placeholder, logs: list[str], max_lines: int = 24) -> 
     )
 
 
-def run_data_store_and_collect_logs() -> tuple[list[str], int]:
+def run_data_store_and_collect_logs(data_progress_box) -> tuple[list[str], int]:
     project_root = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(project_root, "data_store.py")
     command = [sys.executable, "-u", script_path]
@@ -89,11 +89,27 @@ def run_data_store_and_collect_logs() -> tuple[list[str], int]:
     )
 
     live = st.empty()
-    progress = st.progress(0.0, text="대기 중")
-    status = st.empty()
 
-    raw_total = None
-    derived_total = None
+    raw_done = 0
+    raw_total = 1
+    derived_done = 0
+    derived_total = 1
+
+    def _update_data_store_progress() -> None:
+        raw_part = min(max(raw_done / raw_total, 0.0), 1.0)
+        derived_part = min(max(derived_done / derived_total, 0.0), 1.0)
+        total_part = min(max((raw_part * 0.5) + (derived_part * 0.5), 0.0), 1.0)
+
+        st.session_state.data_store_progress_value = total_part
+        st.session_state.data_store_progress_text = (
+            f"전체 {total_part * 100:.2f}% "
+            f"(RAW {raw_part * 50:.2f}% + DERIVED {derived_part * 50:.2f}%) "
+            f"| RAW {raw_done}/{raw_total} | DERIVED {derived_done}/{derived_total}"
+        )
+        data_progress_box.progress(
+            float(st.session_state.data_store_progress_value),
+            text=st.session_state.data_store_progress_text,
+        )
     if process.stdout is not None:
         while True:
             raw_line = process.stdout.readline()
@@ -110,28 +126,27 @@ def run_data_store_and_collect_logs() -> tuple[list[str], int]:
 
             raw_match = re.search(r"\[RAW\s+(\d+)/(\d+)\]", current_line)
             if raw_match:
-                raw_idx = int(raw_match.group(1))
-                raw_total = int(raw_match.group(2))
-                denom = (raw_total * 2) if raw_total > 0 else 1
-                progress_val = min(max(raw_idx / denom, 0.0), 1.0)
-                progress.progress(progress_val, text=f"RAW 단계: {raw_idx}/{raw_total}")
-                status.info(f"현재 진행: RAW {raw_idx}/{raw_total}")
+                raw_done = int(raw_match.group(1))
+                raw_total = int(raw_match.group(2)) if int(raw_match.group(2)) > 0 else 1
+                _update_data_store_progress()
 
             derived_match = re.search(r"\[DERIVED\s+(\d+)/(\d+)\]", current_line)
             if derived_match:
-                derived_idx = int(derived_match.group(1))
-                derived_total = int(derived_match.group(2))
-                total = derived_total if derived_total > 0 else 1
-                progress_val = min(max((total + derived_idx) / (total * 2), 0.0), 1.0)
-                progress.progress(progress_val, text=f"DERIVED 단계: {derived_idx}/{derived_total}")
-                status.info(f"현재 진행: DERIVED {derived_idx}/{derived_total}")
+                derived_done = int(derived_match.group(1))
+                derived_total = int(derived_match.group(2)) if int(derived_match.group(2)) > 0 else 1
+                _update_data_store_progress()
 
     return_code = process.wait()
     if return_code == 0:
-        progress.progress(1.0, text="완료")
-        status.success("데이터 업데이트가 완료되었습니다.")
+        st.session_state.data_store_progress_value = 1.0
+        st.session_state.data_store_progress_text = "전체 100.00% (RAW 50.00% + DERIVED 50.00%) | 완료"
+        data_progress_box.progress(1.0, text=st.session_state.data_store_progress_text)
     else:
-        status.error(f"데이터 업데이트 실패 (종료 코드: {return_code})")
+        st.session_state.data_store_progress_text = "데이터 업데이트 실패"
+        data_progress_box.progress(
+            float(st.session_state.data_store_progress_value),
+            text=st.session_state.data_store_progress_text,
+        )
 
     # 실행 완료 후 라이브 로그 placeholder를 비워, 하단 최종 로그 박스와 중복 렌더링되지 않게 한다.
     live.empty()
@@ -1367,6 +1382,41 @@ def _latest_timeframe_ma10_metrics(code: str, timeframe: str) -> dict:
 
 
 @st.cache_data(show_spinner=False, ttl=120)
+def _latest_timeframe_ma240_metrics(code: str, timeframe: str) -> dict:
+    loader = load_weekly if timeframe == "weekly" else load_monthly
+    try:
+        df = loader(str(code).zfill(6))
+    except Exception:
+        return {"close": None, "ma240": None, "breakout_rate": None}
+
+    if df is None or df.empty:
+        return {"close": None, "ma240": None, "breakout_rate": None}
+
+    work = df.copy()
+    work["date"] = pd.to_datetime(work.get("date"), errors="coerce")
+    work["close"] = pd.to_numeric(work.get("close"), errors="coerce")
+    work["ma240"] = pd.to_numeric(work.get("ma240"), errors="coerce")
+    work = work.dropna(subset=["date"]).sort_values("date")
+    if work.empty:
+        return {"close": None, "ma240": None, "breakout_rate": None}
+
+    recent = work.iloc[-1]
+    close_val = pd.to_numeric(recent.get("close"), errors="coerce")
+    ma240_val = pd.to_numeric(recent.get("ma240"), errors="coerce")
+
+    if pd.notna(close_val) and pd.notna(ma240_val) and float(ma240_val) != 0.0:
+        breakout_rate = (float(close_val) / float(ma240_val)) - 1.0
+    else:
+        breakout_rate = None
+
+    return {
+        "close": float(close_val) if pd.notna(close_val) else None,
+        "ma240": float(ma240_val) if pd.notna(ma240_val) else None,
+        "breakout_rate": (float(breakout_rate) * 100.0) if breakout_rate is not None else None,
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=120)
 def _timeframe_close_at_or_before(code: str, timeframe: str, target_date_text: str) -> Optional[float]:
     loader = load_weekly if timeframe == "weekly" else load_monthly
     try:
@@ -1514,6 +1564,7 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
         current_price = latest.get("current_price")
         price_date = latest.get("price_date")
         weekly = _latest_timeframe_ma10_metrics(str(row["종목코드"]), timeframe="weekly")
+        weekly_240 = _latest_timeframe_ma240_metrics(str(row["종목코드"]), timeframe="weekly")
         monthly = _latest_timeframe_ma10_metrics(str(row["종목코드"]), timeframe="monthly")
 
         buy_price = pd.to_numeric(row["매수가"], errors="coerce")
@@ -1539,8 +1590,10 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
                 "수익액": profit_amount,
                 "수익률": (float(profit_rate) * 100.0) if profit_rate is not None else None,
                 "주봉 10이평": weekly.get("ma10"),
+                "주봉 240이평": weekly_240.get("ma240"),
                 "월봉 10이평": monthly.get("ma10"),
                 "이격도(주)": weekly.get("breakout_rate"),
+                "이격도(주240)": weekly_240.get("breakout_rate"),
                 "이격도(월)": monthly.get("breakout_rate"),
             }
         )
@@ -1558,8 +1611,10 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
         "수익액",
         "수익률",
         "주봉 10이평",
+        "주봉 240이평",
         "월봉 10이평",
         "이격도(주)",
+        "이격도(주240)",
         "이격도(월)",
     ]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -1612,13 +1667,63 @@ def _render_output_holdings_data() -> None:
     st.caption(f"{HOLDINGS_CSV} 데이터를 조회합니다.")
     holdings_path = HOLDINGS_CSV
     os.makedirs(os.path.dirname(holdings_path), exist_ok=True)
+    master = get_master_table()
 
     st.markdown("#### 보유 종목 추가")
+    add_code_candidates: list[str] = []
+    add_name_prefix = st.text_input(
+        "종목명 앞 2글자 입력",
+        value="",
+        max_chars=20,
+        key="holdings_add_name_prefix",
+    )
+    if len(str(add_name_prefix).strip()) >= 2:
+        if not master.empty and {"code", "name"}.issubset(set(master.columns)):
+            filtered = master[master["name"].astype(str).str.startswith(str(add_name_prefix).strip())].copy()
+            if not filtered.empty:
+                filtered = filtered.sort_values(["name", "code"])
+                add_code_candidates = [
+                    f"{str(r['name']).strip()} ({str(r['code']).zfill(6)})"
+                    for _, r in filtered.iterrows()
+                ]
+
+    add_stock_pick = st.selectbox(
+        "추천 종목 리스트",
+        options=add_code_candidates if add_code_candidates else [""],
+        index=0,
+        key="holdings_add_stock_pick",
+    )
+
+    selected_code = ""
+    selected_name = ""
+    picked_text = str(add_stock_pick).strip()
+    if picked_text:
+        m = re.match(r"^(.*)\((\d{6})\)$", picked_text)
+        if m:
+            selected_name = str(m.group(1)).strip()
+            selected_code = str(m.group(2)).strip().zfill(6)
+
+    if st.session_state.get("holdings_add_code", "") != selected_code:
+        st.session_state["holdings_add_code"] = selected_code
+    if st.session_state.get("holdings_add_name", "") != selected_name:
+        st.session_state["holdings_add_name"] = selected_name
+
     add_c1, add_c2, add_c3, add_c4, add_c5 = st.columns([1.1, 1.3, 1.0, 0.9, 2.2])
     with add_c1:
-        add_code = st.text_input("종목코드", value="", max_chars=6, key="holdings_add_code")
+        add_code = st.text_input(
+            "종목코드",
+            value="",
+            max_chars=6,
+            key="holdings_add_code",
+            disabled=True,
+        )
     with add_c2:
-        add_name = st.text_input("종목명", value="", key="holdings_add_name")
+        add_name = st.text_input(
+            "종목명",
+            value="",
+            key="holdings_add_name",
+            disabled=True,
+        )
     with add_c3:
         add_buy = st.text_input("매수가", value="", key="holdings_add_buy")
     with add_c4:
@@ -1629,8 +1734,11 @@ def _render_output_holdings_data() -> None:
     if st.button("보유 종목 추가", key="holdings_add_submit", use_container_width=True):
         try:
             code = str(add_code).strip().replace(" ", "").zfill(6)
+            resolved_name = str(add_name).strip()
             if not re.fullmatch(r"\d{6}", code):
-                raise ValueError("종목코드는 6자리 숫자로 입력하세요.")
+                raise ValueError("추천 종목 리스트에서 종목을 선택하세요.")
+            if not resolved_name:
+                raise ValueError("추천 종목 리스트에서 종목을 선택하세요.")
 
             buy_val = pd.to_numeric(str(add_buy).strip().replace(",", ""), errors="coerce")
             qty_val = pd.to_numeric(str(add_qty).strip().replace(",", ""), errors="coerce")
@@ -1638,14 +1746,6 @@ def _render_output_holdings_data() -> None:
                 raise ValueError("매수가는 0보다 큰 숫자로 입력하세요.")
             if pd.isna(qty_val) or float(qty_val) <= 0:
                 raise ValueError("수량은 0보다 큰 숫자로 입력하세요.")
-
-            resolved_name = str(add_name).strip()
-            if not resolved_name:
-                master = get_master_table()
-                if not master.empty and {"code", "name"}.issubset(set(master.columns)):
-                    hit = master[master["code"].astype(str).str.zfill(6) == code]
-                    if not hit.empty:
-                        resolved_name = str(hit.iloc[0].get("name", "")).strip()
 
             _add_holding_row(
                 holdings_path=holdings_path,
@@ -1740,6 +1840,8 @@ def _render_output_holdings_data() -> None:
                 "수익률",
                 "주봉 10이평",
                 "이격도(주)",
+                "주봉 240이평",
+                "이격도(주240)",
                 "월봉 10이평",
                 "이격도(월)",
                 "메모",
@@ -1762,7 +1864,7 @@ def _render_output_holdings_data() -> None:
                     return "color: #1565c0;"
                 return ""
 
-            right_align_cols = ["매수가", "현재 종가", "수익률", "이격도(주)", "이격도(월)"]
+            right_align_cols = ["매수가", "현재 종가", "수익률", "이격도(주)", "이격도(주240)", "이격도(월)"]
             center_align_cols = ["종목코드", "종목명", "가격일자"]
             styled_action = (
                 action_view.style
@@ -1771,15 +1873,17 @@ def _render_output_holdings_data() -> None:
                         "매수가": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "현재 종가": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "주봉 10이평": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
+                        "주봉 240이평": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "월봉 10이평": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "수익률": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
                         "이격도(주)": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
+                        "이격도(주240)": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
                         "이격도(월)": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
                     }
                 )
                 .set_properties(subset=right_align_cols, **{"text-align": "right"})
                 .set_properties(subset=center_align_cols, **{"text-align": "center"})
-                .map(_pos_neg_color, subset=["수익률", "이격도(주)", "이격도(월)"])
+                .map(_pos_neg_color, subset=["수익률", "이격도(주)", "이격도(주240)", "이격도(월)"])
             )
 
             holdings_column_config = {
@@ -2918,6 +3022,10 @@ if "scan_progress_value" not in st.session_state:
     st.session_state.scan_progress_value = 0.0
 if "scan_progress_text" not in st.session_state:
     st.session_state.scan_progress_text = "스캔 대기 중"
+if "data_store_progress_value" not in st.session_state:
+    st.session_state.data_store_progress_value = 0.0
+if "data_store_progress_text" not in st.session_state:
+    st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
 
 st.sidebar.title("KRX FDR")
 for menu in MENU_ITEMS:
@@ -3078,6 +3186,7 @@ if not st.session_state.show_intro:
     if selected_menu == "1. 데이터 저장":
         st.caption("`data_store.py` 실행 로그를 아래에서 확인합니다.")
         run_status_box = st.empty()
+        data_progress_box = st.empty()
 
         if st.session_state.data_store_run_requested and not st.session_state.data_store_running:
             st.session_state.data_store_run_requested = False
@@ -3115,6 +3224,13 @@ if not st.session_state.show_intro:
             st.session_state.data_store_logs = []
             st.session_state.data_store_last_returncode = None
             st.session_state.awaiting_update_confirm = False
+            st.session_state.data_store_progress_value = 0.0
+            st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
+
+        data_progress_box.progress(
+            float(st.session_state.data_store_progress_value),
+            text=st.session_state.data_store_progress_text,
+        )
 
         execute_update = False
 
@@ -3131,7 +3247,10 @@ if not st.session_state.show_intro:
 
         if st.session_state.data_store_running:
             run_status_box.info("data_store.py 실행중입니다.")
-            logs, return_code = run_data_store_and_collect_logs()
+            st.session_state.data_store_progress_value = 0.0
+            st.session_state.data_store_progress_text = "전체 0.00% (RAW 0.00% + DERIVED 0.00%) | 시작"
+            data_progress_box.progress(0.0, text=st.session_state.data_store_progress_text)
+            logs, return_code = run_data_store_and_collect_logs(data_progress_box)
             st.session_state.data_store_logs = logs
             st.session_state.data_store_last_returncode = return_code
             st.session_state.data_store_running = False
