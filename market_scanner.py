@@ -6,7 +6,11 @@ import os
 import re
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from typing import Optional
+
+# Keep OpenBLAS from allocating a thread pool in every scan worker.
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import pandas as pd
 
@@ -47,7 +51,7 @@ SCAN_CASES = {
     },
 }
 
-DEFAULT_MAX_WORKERS = max(1, (os.cpu_count() or 2) - 1)
+DEFAULT_MAX_WORKERS = 1
 LOOKBACK_RATIO = 2 / 3
 
 # 스캔 대상에서 제외할 종목명 패턴 (ETF/ETN/스팩)
@@ -228,20 +232,14 @@ def scan_all_breakouts_parallel(max_workers: Optional[int] = None) -> dict[str, 
 
     results: dict[str, list[dict]] = {case_key: [] for case_key in SCAN_CASES.keys()}
 
-    print(f"[SCAN] 멀티프로세싱 시작 | 종목 수={len(tasks)} | workers={max_workers}")
+    total_count = len(tasks)
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {executor.submit(_scan_one_stock, task): task for task in tasks}
-
-        done_count = 0
-        total_count = len(future_map)
-
-        for future in as_completed(future_map):
-            code, name = future_map[future]
-            done_count += 1
-
+    if max_workers <= 1:
+        print(f"[SCAN] 순차 스캔 시작 | 종목 수={total_count}")
+        for done_count, task in enumerate(tasks, start=1):
+            code, name = task
             try:
-                rows = future.result()
+                rows = _scan_one_stock(task)
                 for row in rows:
                     results[row["scan_case"]].append(row)
             except Exception as e:
@@ -249,6 +247,32 @@ def scan_all_breakouts_parallel(max_workers: Optional[int] = None) -> dict[str, 
 
             if done_count % 100 == 0 or done_count == total_count:
                 print(f"[SCAN] 진행률: {done_count}/{total_count}")
+    else:
+        print(
+            f"[SCAN] 멀티프로세싱 시작 | 종목 수={total_count} | "
+            f"workers={max_workers}"
+        )
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(_scan_one_stock, task): task for task in tasks}
+
+            done_count = 0
+            for future in as_completed(future_map):
+                code, name = future_map[future]
+                done_count += 1
+
+                try:
+                    rows = future.result()
+                    for row in rows:
+                        results[row["scan_case"]].append(row)
+                except BrokenProcessPool as e:
+                    print(f"[SCAN][FAIL] process pool 종료로 스캔 중단: {code} {name} / {e}")
+                    raise
+                except Exception as e:
+                    print(f"[SCAN][WARN] worker 실패: {code} {name} / {e}")
+
+                if done_count % 100 == 0 or done_count == total_count:
+                    print(f"[SCAN] 진행률: {done_count}/{total_count}")
 
     # 돌파강도 낮은 것부터 높은 것 순서로 정렬
     for case_key in results.keys():

@@ -548,11 +548,11 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
         run_col1, run_col2, run_col3 = st.columns(3)
         with run_col1:
-            run_lookup = st.button("종목 차트 조회", type="primary", use_container_width=True, key=f"{prefix}_run_lookup")
+            run_lookup = st.button("종목 차트 조회", type="primary", width="stretch", key=f"{prefix}_run_lookup")
         with run_col2:
-            move_prev = st.button("이전 1봉", use_container_width=True, key=f"{prefix}_move_prev")
+            move_prev = st.button("이전 1봉", width="stretch", key=f"{prefix}_move_prev")
         with run_col3:
-            move_next = st.button("다음 1봉", use_container_width=True, key=f"{prefix}_move_next")
+            move_next = st.button("다음 1봉", width="stretch", key=f"{prefix}_move_next")
 
     trigger_error = None
     if run_lookup:
@@ -619,7 +619,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
             f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
         )
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width="stretch")
 
         st.markdown("---")
         st.markdown(f"#### {panel_title}")
@@ -647,7 +647,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                 current_watch_path = _interest_watch_monthly_path()
                 st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
 
-        if st.button("현재 차트 데이터 저장", use_container_width=True, key=f"{prefix}_save"):
+        if st.button("현재 차트 데이터 저장", width="stretch", key=f"{prefix}_save"):
             try:
                 snap_date, snap_close = _extract_last_bar_snapshot(
                     code=str(state["code"]),
@@ -744,10 +744,10 @@ def _render_interest_watch_data() -> None:
 
             nav1, nav2, nav3 = st.columns([1, 1, 4])
             with nav1:
-                if st.button("이전 10개", use_container_width=True, key="watch_prev_page"):
+                if st.button("이전 10개", width="stretch", key="watch_prev_page"):
                     st.session_state[page_key] = max(0, int(st.session_state[page_key]) - 1)
             with nav2:
-                if st.button("다음 10개", use_container_width=True, key="watch_next_page"):
+                if st.button("다음 10개", width="stretch", key="watch_next_page"):
                     st.session_state[page_key] = min(total_pages - 1, int(st.session_state[page_key]) + 1)
             with nav3:
                 st.caption(f"페이지 {int(st.session_state[page_key]) + 1}/{total_pages} | 총 {total_rows}건")
@@ -822,7 +822,7 @@ def _render_interest_watch_data() -> None:
             try:
                 table_event = st.dataframe(
                     styled_action,
-                    use_container_width=True,
+                    width="stretch",
                     on_select="rerun",
                     selection_mode="single-row",
                     key="watch_action_table",
@@ -830,13 +830,13 @@ def _render_interest_watch_data() -> None:
                 if table_event is not None and hasattr(table_event, "selection"):
                     selected_rows = list(getattr(table_event.selection, "rows", []) or [])
             except TypeError:
-                st.dataframe(styled_action, use_container_width=True)
+                st.dataframe(styled_action, width="stretch")
 
             c1, c2 = st.columns([1, 5])
             with c1:
-                chart_clicked = st.button("차트", key="watch_action_chart", use_container_width=True)
+                chart_clicked = st.button("차트", key="watch_action_chart", width="stretch")
             with c2:
-                delete_clicked = st.button("삭제", key="watch_action_delete", use_container_width=True)
+                delete_clicked = st.button("삭제", key="watch_action_delete", width="stretch")
 
             if selected_rows:
                 st.session_state[selected_idx_key] = int(start + int(selected_rows[0]))
@@ -871,7 +871,7 @@ def _render_interest_watch_data() -> None:
                 with confirm_cols[0]:
                     st.warning(f"삭제하시겠습니까? {'(' + pending_name + ')' if pending_name else ''}")
                 with confirm_cols[1]:
-                    if st.button("예", key="watch_delete_yes", use_container_width=True):
+                    if st.button("예", key="watch_delete_yes", width="stretch"):
                         try:
                             drop_idx = int(pending_idx)
                             if 0 <= drop_idx < len(wdf):
@@ -883,7 +883,7 @@ def _render_interest_watch_data() -> None:
                         except Exception as del_e:
                             st.error(f"삭제 실패: {del_e}")
                 with confirm_cols[2]:
-                    if st.button("아니오", key="watch_delete_no", use_container_width=True):
+                    if st.button("아니오", key="watch_delete_no", width="stretch"):
                         st.session_state.pop("watch_delete_pending_idx", None)
                         st.session_state.pop("watch_delete_pending_name", None)
                         st.rerun()
@@ -947,11 +947,11 @@ def _render_interest_watch_data() -> None:
 
             mv1, mv2, mv3, mv4, mv5 = st.columns([1, 1, 1, 4, 1])
             with mv1:
-                move_prev = st.button("이전 1봉", key="watch_chart_prev", use_container_width=True)
+                move_prev = st.button("이전 1봉", key="watch_chart_prev", width="stretch")
             with mv2:
-                move_home = st.button("처음위치로", key="watch_chart_home", use_container_width=True)
+                move_home = st.button("처음위치로", key="watch_chart_home", width="stretch")
             with mv3:
-                move_next = st.button("다음 1봉", key="watch_chart_next", use_container_width=True)
+                move_next = st.button("다음 1봉", key="watch_chart_next", width="stretch")
             with mv4:
                 memo_input = st.text_area(
                     "메모",
@@ -961,7 +961,7 @@ def _render_interest_watch_data() -> None:
                     height=68,
                 )
             with mv5:
-                memo_save_clicked = st.button("메모저장", key="watch_chart_memo_save", use_container_width=True)
+                memo_save_clicked = st.button("메모저장", key="watch_chart_memo_save", width="stretch")
 
             st.markdown(
                 """
@@ -1036,7 +1036,7 @@ div[data-testid="stTextArea"] textarea {
                     f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                     f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                 )
-                st.pyplot(fig, use_container_width=True)
+                st.pyplot(fig, width="stretch")
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
@@ -1062,7 +1062,7 @@ def _render_saved_pattern_data() -> None:
         summary_rows.append({"구분": label, "파일명": filename, "행수": count})
 
     st.markdown("#### 기록 파일 요약")
-    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
     st.markdown("#### 기록 데이터")
     record_file_label = st.selectbox(
@@ -1117,10 +1117,10 @@ def _render_saved_pattern_data() -> None:
 
             nav1, nav2, nav3 = st.columns([1, 1, 4])
             with nav1:
-                if st.button("이전 10개", use_container_width=True, key="pattern_prev_page"):
+                if st.button("이전 10개", width="stretch", key="pattern_prev_page"):
                     st.session_state[page_key] = max(0, int(st.session_state[page_key]) - 1)
             with nav2:
-                if st.button("다음 10개", use_container_width=True, key="pattern_next_page"):
+                if st.button("다음 10개", width="stretch", key="pattern_next_page"):
                     st.session_state[page_key] = min(total_pages - 1, int(st.session_state[page_key]) + 1)
             with nav3:
                 st.caption(f"페이지 {int(st.session_state[page_key]) + 1}/{total_pages} | 총 {total_rows}건")
@@ -1156,7 +1156,7 @@ def _render_saved_pattern_data() -> None:
             try:
                 table_event = st.dataframe(
                     table_df,
-                    use_container_width=True,
+                    width="stretch",
                     column_config=pattern_table_column_config,
                     on_select="rerun",
                     selection_mode="single-row",
@@ -1167,13 +1167,13 @@ def _render_saved_pattern_data() -> None:
             except TypeError:
                 st.dataframe(
                     table_df,
-                    use_container_width=True,
+                    width="stretch",
                     column_config=pattern_table_column_config,
                 )
 
             c1, c2 = st.columns([1, 5])
             with c1:
-                chart_clicked = st.button("차트", key="pattern_action_chart", use_container_width=True)
+                chart_clicked = st.button("차트", key="pattern_action_chart", width="stretch")
 
             if selected_rows:
                 st.session_state[selected_idx_key] = int(start + int(selected_rows[0]))
@@ -1238,11 +1238,11 @@ def _render_saved_pattern_data() -> None:
 
             mv1, mv2, mv3, _ = st.columns([1, 1, 1, 3])
             with mv1:
-                move_prev = st.button("이전 1봉", key="pattern_chart_prev", use_container_width=True)
+                move_prev = st.button("이전 1봉", key="pattern_chart_prev", width="stretch")
             with mv2:
-                move_home = st.button("처음위치로", key="pattern_chart_home", use_container_width=True)
+                move_home = st.button("처음위치로", key="pattern_chart_home", width="stretch")
             with mv3:
-                move_next = st.button("다음 1봉", key="pattern_chart_next", use_container_width=True)
+                move_next = st.button("다음 1봉", key="pattern_chart_next", width="stretch")
 
             if move_home:
                 state["target_date"] = str(state.get("origin_target_date", state.get("target_date")))
@@ -1285,7 +1285,7 @@ def _render_saved_pattern_data() -> None:
                     f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                     f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                 )
-                st.pyplot(fig, use_container_width=True)
+                st.pyplot(fig, width="stretch")
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
@@ -1731,7 +1731,7 @@ def _render_output_holdings_data() -> None:
     with add_c5:
         add_memo = st.text_input("메모", value="", key="holdings_add_memo")
 
-    if st.button("보유 종목 추가", key="holdings_add_submit", use_container_width=True):
+    if st.button("보유 종목 추가", key="holdings_add_submit", width="stretch"):
         try:
             code = str(add_code).strip().replace(" ", "").zfill(6)
             resolved_name = str(add_name).strip()
@@ -1894,7 +1894,6 @@ def _render_output_holdings_data() -> None:
             try:
                 table_event = st.dataframe(
                     styled_action,
-                    use_container_width=False,
                     width=1600,
                     column_config=holdings_column_config,
                     on_select="rerun",
@@ -1906,16 +1905,15 @@ def _render_output_holdings_data() -> None:
             except TypeError:
                 st.dataframe(
                     styled_action,
-                    use_container_width=False,
                     width=1600,
                     column_config=holdings_column_config,
                 )
 
             btn1, btn2, btn3 = st.columns([1, 1, 4])
             with btn1:
-                chart_clicked = st.button("차트", key="holdings_action_chart", use_container_width=True)
+                chart_clicked = st.button("차트", key="holdings_action_chart", width="stretch")
             with btn2:
-                delete_clicked = st.button("삭제", key="holdings_action_delete", use_container_width=True)
+                delete_clicked = st.button("삭제", key="holdings_action_delete", width="stretch")
 
             if selected_rows:
                 st.session_state[selected_idx_key] = int(selected_rows[0])
@@ -1983,7 +1981,7 @@ def _render_output_holdings_data() -> None:
                 with dc1:
                     st.warning(f"삭제하시겠습니까? {'(' + pending_name + ')' if pending_name else ''}")
                 with dc2:
-                    if st.button("예", key="holdings_delete_yes", use_container_width=True):
+                    if st.button("예", key="holdings_delete_yes", width="stretch"):
                         try:
                             raw_idx = int(pending_raw)
 
@@ -2016,7 +2014,7 @@ def _render_output_holdings_data() -> None:
                         except Exception as del_e:
                             st.error(f"삭제 실패: {del_e}")
                 with dc3:
-                    if st.button("아니오", key="holdings_delete_no", use_container_width=True):
+                    if st.button("아니오", key="holdings_delete_no", width="stretch"):
                         st.session_state.pop("holdings_delete_pending_raw", None)
                         st.session_state.pop("holdings_delete_pending_name", None)
                         st.session_state.pop("holdings_delete_pending_code", None)
@@ -2082,9 +2080,9 @@ def _render_output_holdings_data() -> None:
 
                 mv1, mv2, mv3, mv4 = st.columns([1, 1, 4, 1])
                 with mv1:
-                    move_prev = st.button("이전 1봉", key="holdings_chart_prev", use_container_width=True)
+                    move_prev = st.button("이전 1봉", key="holdings_chart_prev", width="stretch")
                 with mv2:
-                    move_next = st.button("다음 1봉", key="holdings_chart_next", use_container_width=True)
+                    move_next = st.button("다음 1봉", key="holdings_chart_next", width="stretch")
                 with mv3:
                     memo_input = st.text_area(
                         "메모",
@@ -2094,7 +2092,7 @@ def _render_output_holdings_data() -> None:
                         height=68,
                     )
                 with mv4:
-                    memo_save_clicked = st.button("메모저장", key="holdings_chart_memo_save", use_container_width=True)
+                    memo_save_clicked = st.button("메모저장", key="holdings_chart_memo_save", width="stretch")
 
                 if memo_save_clicked:
                     try:
@@ -2169,7 +2167,7 @@ div[data-testid="stTextArea"] textarea {
                         f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                         f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                     )
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width="stretch")
                 except Exception as chart_e:
                     st.error(f"차트 생성 실패: {chart_e}")
             else:
@@ -2530,17 +2528,24 @@ def _render_case_gallery(
         st.session_state[gallery_sig_key] = current_sig
         st.session_state[thumb_selected_key] = 0
 
-    if idx_key not in st.session_state or st.session_state[idx_key] >= len(gallery_items):
-        st.session_state[idx_key] = 0
+    current_idx = min(
+        max(int(st.session_state.get(idx_key, 0)), 0),
+        len(gallery_items) - 1,
+    )
+    st.session_state[idx_key] = current_idx
     if thumb_selected_key not in st.session_state or int(st.session_state[thumb_selected_key]) >= len(gallery_items):
         st.session_state[thumb_selected_key] = int(st.session_state[idx_key])
 
     nav1, nav2, nav3 = st.columns([1, 1, 4])
     with nav1:
-        if st.button("이전", key=f"prev_{case_key}"):
+        if st.button("이전", key=f"prev_{case_key}", disabled=current_idx == 0):
             st.session_state[idx_key] = max(0, st.session_state[idx_key] - 1)
     with nav2:
-        if st.button("다음", key=f"next_{case_key}"):
+        if st.button(
+            "다음",
+            key=f"next_{case_key}",
+            disabled=current_idx == len(gallery_items) - 1,
+        ):
             st.session_state[idx_key] = min(len(gallery_items) - 1, st.session_state[idx_key] + 1)
 
     selected = gallery_items[st.session_state[idx_key]]
@@ -2556,7 +2561,7 @@ def _render_case_gallery(
         ),
         unsafe_allow_html=True,
     )
-    st.image(selected["image_path"], use_container_width=True)
+    st.image(selected["image_path"], width="stretch")
     st.caption(
         f"{st.session_state[idx_key] + 1}/{len(gallery_items)} | {selected.get('caption', '')} | "
         f"돌파율 {float(selected.get('breakout_pct', 0.0)):.2f}% | {vol_text}"
@@ -2593,7 +2598,7 @@ def _render_case_gallery(
 
     if st.button(
         "현재 확대 종목 관심저장",
-        use_container_width=True,
+        width="stretch",
         key=f"review_interest_save_{case_key}",
         disabled=not can_save,
     ):
@@ -3030,7 +3035,7 @@ if "data_store_progress_text" not in st.session_state:
 st.sidebar.title("KRX FDR")
 for menu in MENU_ITEMS:
     button_type = "primary" if st.session_state.selected_menu == menu else "secondary"
-    if st.sidebar.button(menu, key=f"menu_btn_{menu}", use_container_width=True, type=button_type):
+    if st.sidebar.button(menu, key=f"menu_btn_{menu}", width="stretch", type=button_type):
         st.session_state.selected_menu = menu
         st.query_params["menu"] = str(MENU_ITEMS.index(menu))
         st.rerun()
@@ -3179,7 +3184,7 @@ if top_right is not None:
 if st.session_state.show_intro and scan_status["case_counts"]:
     st.markdown("### 케이스별 돌파 건수")
     case_df = pd.DataFrame(scan_status["case_counts"])
-    st.dataframe(case_df, use_container_width=True, hide_index=True)
+    st.dataframe(case_df, width="stretch", hide_index=True)
 
 if not st.session_state.show_intro:
     st.markdown("<div class='panel'>", unsafe_allow_html=True)
@@ -3213,12 +3218,12 @@ if not st.session_state.show_intro:
             run_clicked = st.button(
                 run_button_label,
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="run_data_store_button",
                 disabled=st.session_state.data_store_running,
             )
         with col_clear:
-            clear_clicked = st.button("로그 지우기", use_container_width=True, disabled=st.session_state.data_store_running)
+            clear_clicked = st.button("로그 지우기", width="stretch", disabled=st.session_state.data_store_running)
 
         if clear_clicked:
             st.session_state.data_store_logs = []
@@ -3296,14 +3301,14 @@ if not st.session_state.show_intro:
             run_clicked = st.button(
                 run_button_label,
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="run_scan_market_button",
                 disabled=st.session_state.scan_market_running,
             )
         with col_clear:
             clear_clicked = st.button(
                 "로그 지우기",
-                use_container_width=True,
+                width="stretch",
                 key="clear_scan_log",
                 disabled=st.session_state.scan_market_running,
             )
@@ -3485,7 +3490,7 @@ if not st.session_state.show_intro:
                     for key in keys:
                         label = REVIEW_CASE_LABELS.get(key, key)
                         btn_type = "primary" if st.session_state.review_selected_case == key else "secondary"
-                        if st.button(label, key=f"case_sel_{key}", use_container_width=True, type=btn_type):
+                        if st.button(label, key=f"case_sel_{key}", width="stretch", type=btn_type):
                             st.session_state.review_selected_case = key
 
             selected_key = st.session_state.review_selected_case
@@ -3515,5 +3520,5 @@ if not st.session_state.show_intro:
     else:
         st.caption("하단의 넓은 영역은 실제 종목/스캔 결과 차트가 표시될 자리입니다.")
         chart_df = build_mock_chart_data()
-        st.line_chart(chart_df, use_container_width=True, height=470)
+        st.line_chart(chart_df, width="stretch", height=470)
     st.markdown("</div>", unsafe_allow_html=True)

@@ -71,12 +71,15 @@
 
 실행 로그에 제외 수량이 출력됩니다.
 
-## 5. 병렬 처리
+## 5. 스캔 실행 방식
 
-- 기본 worker: `max(1, os.cpu_count() - 1)`
-- `ProcessPoolExecutor` 사용
-- 100건 단위 진행률 출력
-- worker 예외는 경고 출력 후 계속 진행
+- 기본 실행은 단일 프로세스 순차 처리로, Windows에서 여러 worker가 Pandas를
+  동시에 불러올 때 발생할 수 있는 메모리/페이징 파일 부족을 방지합니다.
+- `scan_all_breakouts(max_workers=N)`에 `N > 1`을 지정하면 `ProcessPoolExecutor`
+  병렬 처리를 사용합니다.
+- 100건 단위로 진행률을 출력합니다.
+- 일반 종목 작업 예외는 경고 출력 후 계속 진행합니다.
+- 병렬 실행 중 process pool이 비정상 종료되면 예외를 다시 발생시켜 스캔을 중단합니다.
 
 ## 6. 결과 저장 구조
 
