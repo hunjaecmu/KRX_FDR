@@ -172,7 +172,7 @@ def attach_run_metadata(df: pd.DataFrame, metadata: Dict[str, str]) -> pd.DataFr
 def normalize_fdr_listing(df: pd.DataFrame) -> pd.DataFrame:
     """
     FDR StockListing 결과를 표준화.
-    기대 컬럼: Code, Name, Market
+    기대 컬럼: Code 또는 Symbol, Name, Market
     """
     if df is None or df.empty:
         return pd.DataFrame(columns=["code", "name", "market"])
@@ -182,7 +182,7 @@ def normalize_fdr_listing(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {}
     for col in result.columns:
         lower = str(col).strip().lower()
-        if lower == "code":
+        if lower in {"code", "symbol"}:
             col_map[col] = "code"
         elif lower == "name":
             col_map[col] = "name"
@@ -234,17 +234,15 @@ def _needs_krx_refresh(master_file: str) -> bool:
         return True
 
     try:
-        df = pd.read_csv(master_file, nrows=5000)
+        markets = pd.read_csv(master_file, usecols=["market"])["market"]
     except Exception:
         return True
 
-    if df.empty:
-        return True
-    if "market" not in df.columns:
+    if markets.empty:
         return True
 
-    market_values = set(df["market"].astype(str).str.upper().str.strip().unique())
-    return "KOSDAQ" not in market_values
+    market_values = set(markets.astype(str).str.upper().str.strip().unique())
+    return not {"KOSDAQ", "ETF/KR"}.issubset(market_values)
 
 
 def update_master(force: bool = False) -> pd.DataFrame:
@@ -260,27 +258,30 @@ def update_master(force: bool = False) -> pd.DataFrame:
         master_df["code"] = master_df["code"].astype(str).str.zfill(6)
         return master_df
 
-    print("[MASTER] KRX(KOSPI+KOSDAQ) 종목 목록 갱신 시작")
+    print("[MASTER] KRX(KOSPI+KOSDAQ+ETF) 종목 목록 갱신 시작")
 
     try:
         kospi_df = _fetch_listing_with_retry("KOSPI")
         time.sleep(SLEEP_SEC_BETWEEN_MASTER_CALLS)
         kosdaq_df = _fetch_listing_with_retry("KOSDAQ")
+        time.sleep(SLEEP_SEC_BETWEEN_MASTER_CALLS)
+        etf_df = _fetch_listing_with_retry("ETF/KR")
+        etf_df["market"] = "ETF/KR"
 
         master_df = (
-            pd.concat([kospi_df, kosdaq_df], ignore_index=True)
+            pd.concat([kospi_df, kosdaq_df, etf_df], ignore_index=True)
             .sort_values("code")
             .drop_duplicates(subset=["code"], keep="first")
             .reset_index(drop=True)
         )
 
         if master_df.empty:
-            raise RuntimeError("KOSPI+KOSDAQ 병합 결과가 비어 있습니다.")
+            raise RuntimeError("KOSPI+KOSDAQ+ETF 병합 결과가 비어 있습니다.")
 
         master_df.to_csv(MASTER_FILE, index=False, encoding="utf-8-sig")
         print(
             f"[MASTER] 저장 완료: {MASTER_FILE} / total={len(master_df)} "
-            f"(KOSPI={len(kospi_df)}, KOSDAQ={len(kosdaq_df)})"
+            f"(KOSPI={len(kospi_df)}, KOSDAQ={len(kosdaq_df)}, ETF={len(etf_df)})"
         )
         return master_df
 
@@ -293,7 +294,7 @@ def update_master(force: bool = False) -> pd.DataFrame:
         old_df["code"] = old_df["code"].astype(str).str.zfill(6)
         return old_df
 
-    raise RuntimeError("KRX(KOSPI+KOSDAQ) 종목 목록을 가져오지 못했습니다.")
+    raise RuntimeError("KRX(KOSPI+KOSDAQ+ETF) 종목 목록을 가져오지 못했습니다.")
 
 
 # =========================================================
@@ -615,12 +616,20 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
 
             # Skip only when today's bar is already finalized.
             if last_saved == end_date and last_price_status == "종가":
-                print(f"[RAW][SKIP] {code} {name} 이미 최신(종가)")
-                return {"status": "skip", "rows": 0, "updated": False}
+                return {
+                    "status": "skip",
+                    "message": "이미 최신(종가)",
+                    "rows": 0,
+                    "updated": False,
+                }
 
             if pd.to_datetime(last_saved) > pd.to_datetime(end_date):
-                print(f"[RAW][SKIP] {code} {name} 저장 데이터 날짜가 오늘보다 미래")
-                return {"status": "skip", "rows": 0, "updated": False}
+                return {
+                    "status": "skip",
+                    "message": "저장 데이터 날짜가 오늘보다 미래",
+                    "rows": 0,
+                    "updated": False,
+                }
 
             if last_saved == end_date and last_price_status == "장중":
                 # Refetch same-day bar to refresh intraday snapshot.
@@ -641,8 +650,12 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
             new_has_values = not new_df.dropna(how="all").empty
 
             if not new_has_values and old_has_values:
-                print(f"[RAW][{mode}] {code} {name} 신규 데이터 없음")
-                return {"status": "empty", "rows": 0, "updated": False}
+                return {
+                    "status": "empty",
+                    "message": "신규 데이터 없음",
+                    "rows": 0,
+                    "updated": False,
+                }
 
             if old_has_values and new_has_values:
                 merged = pd.concat([old_df, new_df], ignore_index=True)
@@ -660,18 +673,31 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
             )
 
         if merged.empty:
-            print(f"[RAW][{mode}] {code} {name} 저장할 데이터 없음")
-            return {"status": "empty", "rows": 0, "updated": False}
+            return {
+                "status": "empty",
+                "message": "저장할 데이터 없음",
+                "rows": 0,
+                "updated": False,
+            }
 
         save_raw_daily(file_path, merged)
         added_rows = len(new_df) if not force_full_refresh else len(merged)
 
-        print(f"[RAW][{mode}] {code} {name} 저장 완료 / rows={len(merged)} / added={added_rows}")
-        return {"status": mode.lower(), "rows": int(added_rows), "updated": True}
+        return {
+            "status": mode.lower(),
+            "message": f"저장 완료 / rows={len(merged)} / added={added_rows}",
+            "rows": int(added_rows),
+            "updated": True,
+        }
 
     except Exception as e:
-        print(f"[RAW][FAIL] {code} {name}: {e}")
-        return {"status": "fail", "rows": 0, "updated": False, "reason": str(e)}
+        return {
+            "status": "fail",
+            "message": f"실패: {e}",
+            "rows": 0,
+            "updated": False,
+            "reason": str(e),
+        }
         
 # =========================================================
 # 파생 데이터(일/주/월)
@@ -841,7 +867,7 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
     ensure_dirs()
 
     print("======================================")
-    print("KRX(KOSPI+KOSDAQ) 수집 시작 (FinanceDataReader)")
+    print("KRX(KOSPI+KOSDAQ+ETF) 수집 시작 (FinanceDataReader)")
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("======================================")
 
@@ -857,8 +883,8 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
         code = str(row.code).zfill(6)
         name = str(row.name).strip()
 
-        print(f"\n[RAW {i}/{total}] {code} {name}")
         res = update_one_raw_stock(code, name)
+        print(f"[RAW {i}/{total}] {code} {name} {res.get('message', res['status'])}")
         res["code"] = code
         res["name"] = name
         raw_results.append(res)

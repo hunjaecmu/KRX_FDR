@@ -1,6 +1,6 @@
 # KRX_FDR 프로젝트
 
-KRX(KOSPI/KOSDAQ) 시세 데이터를 수집하고, 이동평균 기반 돌파 스캔과 포지션 트래킹, 차트/리포트 생성을 수행하는 Python 프로젝트입니다.
+KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 기반 돌파 스캔과 포지션 트래킹, 차트/리포트 생성을 수행하는 Python 프로젝트입니다.
 
 ## 프로젝트 목적
 
@@ -17,7 +17,7 @@ KRX(KOSPI/KOSDAQ) 시세 데이터를 수집하고, 이동평균 기반 돌파 �
 ### A. 원천/파생 시세 데이터 (`DATA_DIR`)
 
 - `master/kospi_tickers.csv`
-  - KOSPI/KOSDAQ 종목 마스터
+  - KOSPI/KOSDAQ/한국 ETF 종목 마스터
 - `raw/daily/*.csv`
   - 종목별 원시 일봉 OHLCV
   - 실행 메타(`asof_datetime`, `asof_date`, `asof_time`, `price_status`) 포함

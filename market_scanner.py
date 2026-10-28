@@ -54,9 +54,8 @@ SCAN_CASES = {
 DEFAULT_MAX_WORKERS = 1
 LOOKBACK_RATIO = 2 / 3
 
-# 스캔 대상에서 제외할 종목명 패턴 (ETF/ETN/스팩)
+# 스캔 대상에서 제외할 종목명 패턴 (ETN/스팩)
 EXCLUDED_NAME_PATTERNS = [
-    r"ETF",
     r"ETN",
     r"SPAC",
     r"스팩",
@@ -218,7 +217,7 @@ def scan_all_breakouts_parallel(max_workers: Optional[int] = None) -> dict[str, 
         if excluded_count > 0:
             print(
                 f"[SCAN] 종목 필터 적용 | 제외={excluded_count} "
-                f"(ETF/ETN/스팩) | 대상={len(master)}/{before_count}"
+                f"(ETN/스팩) | 대상={len(master)}/{before_count}"
             )
 
     if max_workers is None:
