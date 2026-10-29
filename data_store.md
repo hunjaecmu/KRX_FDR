@@ -11,6 +11,8 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
   - ETF 목록에서 코드 컬럼으로 제공되는 `Symbol`도 표준 `code`로 변환
   - ETF 행은 `market=ETF/KR`로 구분
 - 원시 일봉(raw) 수집/증분 업데이트 (`update_one_raw_stock`)
+  - 저장된 과거 장중 일봉이 2일 이상 연속되면 해당 날짜 범위를 한 번에 재조회해 종가로 보정
+  - 재조회 로그에는 여러 날짜의 개별 항목 대신 범위의 시작일과 종료일을 표시
 - 파생 데이터 생성
   - 일봉 (`build_daily_derived`)
   - 주봉 (`build_weekly_derived`)

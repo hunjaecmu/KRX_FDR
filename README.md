@@ -65,6 +65,7 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 
 - FinanceDataReader 기반 KRX 종목/일봉 수집
 - 증분 업데이트 + 재시도 로직
+- daily update 시 RAW 파일은 50종목 단위 메모리 버퍼로 모아 저장하여 종목별 디스크 쓰기를 줄임
 - 거래량 0 봉 보정 규칙 적용
   - `volume == 0`이면 OHLC를 마지막 거래일 종가로 보정
 - 이동평균 계산 시 거래량 0 봉 제외

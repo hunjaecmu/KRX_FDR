@@ -26,6 +26,8 @@ START_YEARS_AGO = 25
 SLEEP_SEC_BETWEEN_TICKERS = 0.12
 SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
+# 전체 시세를 메모리에 오래 유지하지 않으면서 디스크 쓰기 횟수를 줄이는 기준.
+RAW_SAVE_BUFFER_SIZE = 50
 
 MA_WINDOWS = [5, 10, 20, 120, 180, 240]
 
@@ -469,10 +471,11 @@ def repair_trailing_intraday_to_final(
     file_path: str,
     end_date: str,
     run_meta: Dict[str, str],
+    save: bool = True,
 ) -> Dict[str, int]:
     """
     마지막 저장일 기준 연속된 '장중' 구간 중 과거 날짜(< end_date)에 대해
-    일자를 하나씩 재조회해 종가 데이터를 덮어쓴다.
+    과거 날짜가 2일 이상이면 범위로 조회해 종가 데이터를 덮어쓴다.
     """
     trailing = get_trailing_intraday_dates(file_path)
     if not trailing:
@@ -491,49 +494,60 @@ def repair_trailing_intraday_to_final(
     final_meta = dict(run_meta)
     final_meta["price_status"] = "종가"
 
-    repaired_rows = []
-    repaired_count = 0
+    target_dates = sorted(historical_targets)
+    start_date = target_dates[0]
+    end_date = target_dates[-1]
+    fetch_end_date = next_day(end_date)
 
-    # 가장 오래된 날짜부터 재적용하면 후속 결합 시 흐름이 단순하다.
-    for target_date in reversed(historical_targets):
-        try:
-            day_df = fetch_ohlcv_with_retry(
-                code=code,
-                start_date=target_date,
-                end_date=next_day(target_date),
-                metadata=final_meta,
+    try:
+        fetched_df = fetch_ohlcv_with_retry(
+            code=code,
+            start_date=start_date,
+            end_date=fetch_end_date,
+            metadata=final_meta,
+        )
+
+        if fetched_df.empty:
+            return {"checked": len(trailing), "repaired": 0}
+
+        fetched_df = fetched_df.copy()
+        fetched_df["date"] = pd.to_datetime(fetched_df["date"]).dt.normalize()
+        target_timestamps = pd.to_datetime(target_dates)
+        repaired_df = fetched_df[fetched_df["date"].isin(target_timestamps)]
+        if repaired_df.empty:
+            return {"checked": len(trailing), "repaired": 0}
+
+        if len(target_dates) == 1:
+            print(f"[RAW][REPAIR] {code} {name} {start_date} 장중 -> 종가 재조회 완료")
+        else:
+            print(
+                f"[RAW][REPAIR] {code} {name} {start_date}~{end_date} "
+                "장중 -> 종가 범위 재조회 완료"
             )
-
-            if day_df.empty:
-                continue
-
-            day_df = day_df.copy()
-            day_df["date"] = pd.to_datetime(day_df["date"]).dt.normalize()
-            target_ts = pd.to_datetime(target_date)
-            day_df = day_df[day_df["date"] == target_ts]
-
-            if day_df.empty:
-                continue
-
-            repaired_rows.append(day_df)
-            repaired_count += 1
-            print(f"[RAW][REPAIR] {code} {name} {target_date} 장중 -> 종가 재조회 완료")
-        except Exception as e:
-            print(f"[RAW][REPAIR][WARN] {code} {name} {target_date} 재조회 실패: {e}")
-
-    if not repaired_rows:
+    except Exception as e:
+        if len(target_dates) == 1:
+            print(f"[RAW][REPAIR][WARN] {code} {name} {start_date} 재조회 실패: {e}")
+        else:
+            print(
+                f"[RAW][REPAIR][WARN] {code} {name} {start_date}~{end_date} "
+                f"범위 재조회 실패: {e}"
+            )
         return {"checked": len(trailing), "repaired": 0}
 
-    patch_df = pd.concat(repaired_rows, ignore_index=True)
     merged = (
-        pd.concat([old_df, patch_df], ignore_index=True)
+        pd.concat([old_df, repaired_df], ignore_index=True)
           .sort_values("date")
           .drop_duplicates(subset=["date"], keep="last")
           .reset_index(drop=True)
     )
-    save_raw_daily(file_path, merged)
+    if save:
+        save_raw_daily(file_path, merged)
 
-    return {"checked": len(trailing), "repaired": repaired_count}
+    return {
+        "checked": len(trailing),
+        "repaired": len(repaired_df),
+        "data": merged,
+    }
 
 
 def raw_schema_needs_refresh(file_path: str) -> bool:
@@ -584,7 +598,7 @@ def load_raw_daily(file_path: str) -> pd.DataFrame:
     )
     return df
 
-def update_one_raw_stock(code: str, name: str) -> Dict:
+def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
     file_path = raw_file_path(code, name)
     end_date = today_str("%Y-%m-%d")
     run_meta = get_run_metadata()
@@ -600,12 +614,8 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
             file_path=file_path,
             end_date=end_date,
             run_meta=run_meta,
+            save=save,
         )
-        if repair_info.get("repaired", 0) > 0:
-            print(
-                f"[RAW][REPAIR] {code} {name} trailing_intraday_checked={repair_info.get('checked', 0)} "
-                f"repaired={repair_info.get('repaired', 0)}"
-            )
 
         last_saved = get_existing_last_date(file_path)
         if last_saved is None:
@@ -645,7 +655,12 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
         if force_full_refresh:
             merged = new_df.copy()
         else:
-            old_df = load_raw_daily(file_path)
+            repaired_df = repair_info.get("data")
+            old_df = (
+                repaired_df
+                if isinstance(repaired_df, pd.DataFrame)
+                else load_raw_daily(file_path)
+            )
             old_has_values = not old_df.dropna(how="all").empty
             new_has_values = not new_df.dropna(how="all").empty
 
@@ -680,15 +695,20 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
                 "updated": False,
             }
 
-        save_raw_daily(file_path, merged)
+        if save:
+            save_raw_daily(file_path, merged)
         added_rows = len(new_df) if not force_full_refresh else len(merged)
 
-        return {
+        result = {
             "status": mode.lower(),
             "message": f"저장 완료 / rows={len(merged)} / added={added_rows}",
             "rows": int(added_rows),
             "updated": True,
         }
+        if not save:
+            result["_pending_file_path"] = file_path
+            result["_pending_data"] = merged
+        return result
 
     except Exception as e:
         return {
@@ -857,34 +877,67 @@ def generate_derived_for_one_stock(code: str, name: str) -> Dict:
 # =========================================================
 # 전체 실행
 # =========================================================
-def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
+def market_group(market: str) -> str:
+    m = str(market).upper().strip()
+    if m.startswith("KOSDAQ"):
+        return "KOSDAQ"
+    if m.startswith("ETF"):
+        return "ETF"
+    return "KOSPI"
+
+
+def run_all(
+    force_master_update: bool = False,
+    derive_all: bool = True,
+    markets: Optional[List[str]] = None,
+) -> None:
     """
     derive_all=True:
         raw 업데이트 여부와 상관없이 모든 종목의 derived 재계산
     derive_all=False:
         raw가 변경된 종목만 derived 재계산
+    markets: "KOSPI", "KOSDAQ", "ETF" 중 업데이트할 시장 (None이면 전체)
     """
     ensure_dirs()
 
+    selected = [m.upper() for m in markets] if markets else ["KOSPI", "KOSDAQ", "ETF"]
+
     print("======================================")
-    print("KRX(KOSPI+KOSDAQ+ETF) 수집 시작 (FinanceDataReader)")
+    print(f"KRX({'+'.join(selected)}) 수집 시작 (FinanceDataReader)")
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("======================================")
 
     master_df = update_master(force=force_master_update)
+    master_df = master_df[master_df["market"].map(market_group).isin(selected)].reset_index(drop=True)
 
     raw_results = []
     derived_results = []
 
     total = len(master_df)
     updated_codes = set()
+    pending_raw_saves: List[tuple[str, pd.DataFrame]] = []
+
+    def flush_raw_saves() -> None:
+        for file_path, df in pending_raw_saves:
+            save_raw_daily(file_path, df)
+        pending_raw_saves.clear()
 
     for i, row in enumerate(master_df.itertuples(index=False), start=1):
         code = str(row.code).zfill(6)
         name = str(row.name).strip()
 
-        res = update_one_raw_stock(code, name)
-        print(f"[RAW {i}/{total}] {code} {name} {res.get('message', res['status'])}")
+        res = update_one_raw_stock(code, name, save=False)
+        if res.get("updated"):
+            pending_raw_saves.append(
+                (res["_pending_file_path"], res["_pending_data"])
+            )
+            res.pop("_pending_file_path")
+            res.pop("_pending_data")
+            if len(pending_raw_saves) >= RAW_SAVE_BUFFER_SIZE:
+                flush_raw_saves()
+
+        if i % 50 == 0 or i == total:
+            print(f"[RAW {i}/{total}] 진행중")
         res["code"] = code
         res["name"] = name
         raw_results.append(res)
@@ -894,6 +947,7 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
 
         time.sleep(SLEEP_SEC_BETWEEN_TICKERS)
 
+    flush_raw_saves()
     raw_result_df = pd.DataFrame(raw_results)
 
     for i, row in enumerate(master_df.itertuples(index=False), start=1):
@@ -937,7 +991,10 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
     run_all(
         force_master_update=False,
-        derive_all=True
+        derive_all=True,
+        markets=sys.argv[1:] or None,
     )

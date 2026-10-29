@@ -5,6 +5,8 @@ import html
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from datetime import date, timedelta
 from random import randint
 from typing import Optional
@@ -69,10 +71,10 @@ def _render_live_log(live_placeholder, logs: list[str], max_lines: int = 24) -> 
     )
 
 
-def run_data_store_and_collect_logs(data_progress_box) -> tuple[list[str], int]:
+def run_data_store_and_collect_logs(data_progress_box, markets: Optional[list[str]] = None) -> tuple[list[str], int]:
     project_root = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(project_root, "data_store.py")
-    command = [sys.executable, "-u", script_path]
+    command = [sys.executable, "-u", script_path, *(markets or [])]
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -111,16 +113,21 @@ def run_data_store_and_collect_logs(data_progress_box) -> tuple[list[str], int]:
             text=st.session_state.data_store_progress_text,
         )
     if process.stdout is not None:
+        last_render = 0.0
         while True:
             raw_line = process.stdout.readline()
             if not raw_line:
                 if process.poll() is not None:
                     break
+                time.sleep(0.05)
                 continue
 
             line_text = _decode_log_bytes(raw_line)
             _append_log_text(logs, line_text)
-            _render_live_log(live, logs)
+            now = time.monotonic()
+            if now - last_render >= 0.5:
+                _render_live_log(live, logs)
+                last_render = now
 
             current_line = logs[-1] if logs else ""
 
@@ -154,73 +161,108 @@ def run_data_store_and_collect_logs(data_progress_box) -> tuple[list[str], int]:
     return logs, return_code
 
 
-def run_scan_market_and_collect_logs(scan_progress_box) -> tuple[list[str], int]:
+SCAN_LOG_TAIL_BYTES = 256 * 1024
+SCAN_LIVE_LOG_LINES = 24
+SCAN_REFRESH_SEC = 1
+
+
+@st.cache_resource
+def _scan_job_registry() -> dict:
+    # 서버 프로세스 전체에서 공유: 브라우저 새로고침/세션 변경에도 실행 중인 스캔을 유지한다.
+    return {"proc": None, "log_path": None, "log_handle": None}
+
+
+def is_scan_job_running() -> bool:
+    proc = _scan_job_registry()["proc"]
+    return proc is not None and proc.poll() is None
+
+
+def start_scan_job() -> None:
+    registry = _scan_job_registry()
+    if is_scan_job_running():
+        return
+
     project_root = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(project_root, "scripts", "scan_market.py")
-    command = [sys.executable, "-u", script_path]
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
-    logs: list[str] = []
-    process = subprocess.Popen(
-        command,
+    log_path = os.path.join(tempfile.gettempdir(), "krx_scan_market.log")
+    if registry["log_handle"] is not None:
+        registry["log_handle"].close()
+    log_handle = open(log_path, "wb")
+    registry["log_handle"] = log_handle
+    registry["log_path"] = log_path
+    registry["proc"] = subprocess.Popen(
+        [sys.executable, "-u", script_path],
         cwd=project_root,
-        stdout=subprocess.PIPE,
+        stdout=log_handle,
         stderr=subprocess.STDOUT,
-        text=False,
-        bufsize=0,
         env=env,
     )
 
-    live = st.empty()
-    scan_done = 0
-    scan_total = 1
-    chart_done = 0
-    chart_total = 1
 
-    if process.stdout is not None:
-        while True:
-            raw_line = process.stdout.readline()
-            if not raw_line:
-                if process.poll() is not None:
-                    break
-                continue
+def _read_log_tail_lines(log_path: Optional[str], max_bytes: int = SCAN_LOG_TAIL_BYTES) -> list[str]:
+    if not log_path or not os.path.isfile(log_path):
+        return []
+    with open(log_path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        fh.seek(max(size - max_bytes, 0))
+        data = fh.read()
+    lines: list[str] = []
+    _append_log_text(lines, _decode_log_bytes(data))
+    return lines
 
-            line_text = _decode_log_bytes(raw_line)
-            _append_log_text(logs, line_text)
-            _render_live_log(live, logs)
 
-            current_line = next((x for x in reversed(logs) if str(x).strip()), "")
+def _parse_scan_progress(lines: list[str]) -> tuple[float, str]:
+    scan_done, scan_total, chart_done, chart_total = 0, 1, 0, 1
+    for line in reversed(lines):
+        if scan_total == 1 and scan_done == 0:
+            m = re.search(r"\[SCAN\]\s*진행률:\s*(\d+)/(\d+)", line)
+            if m:
+                scan_done, scan_total = int(m.group(1)), max(int(m.group(2)), 1)
+        if chart_total == 1 and chart_done == 0:
+            m = re.search(r"\[CHART\]\s*생성중\s*(\d+)/(\d+)", line)
+            if m:
+                chart_done, chart_total = int(m.group(1)), max(int(m.group(2)), 1)
+        if (scan_done or scan_total > 1) and (chart_done or chart_total > 1):
+            break
+    scan_part = min(max(scan_done / scan_total, 0.0), 1.0)
+    chart_part = min(max(chart_done / chart_total, 0.0), 1.0)
+    value = min(max(scan_part * 0.5 + chart_part * 0.5, 0.0), 1.0)
+    return value, f"SCAN {scan_done}/{scan_total} | CHART {chart_done}/{chart_total}"
 
-            scan_match = re.search(r"\[SCAN\]\s*진행률:\s*(\d+)/(\d+)", current_line)
-            if scan_match:
-                scan_done = int(scan_match.group(1))
-                scan_total = int(scan_match.group(2)) if int(scan_match.group(2)) > 0 else 1
 
-            chart_match = re.search(r"\[CHART\]\s*생성중\s*(\d+)/(\d+)", current_line)
-            if chart_match:
-                chart_done = int(chart_match.group(1))
-                chart_total = int(chart_match.group(2)) if int(chart_match.group(2)) > 0 else 1
-
-            scan_part = min(max(scan_done / scan_total, 0.0), 1.0)
-            chart_part = min(max(chart_done / chart_total, 0.0), 1.0)
-            progress_val = min(max((scan_part * 0.5) + (chart_part * 0.5), 0.0), 1.0)
-            st.session_state.scan_progress_value = progress_val
-            st.session_state.scan_progress_text = f"SCAN {scan_done}/{scan_total} | CHART {chart_done}/{chart_total}"
-            scan_progress_box.progress(progress_val, text=st.session_state.scan_progress_text)
-
-    return_code = process.wait()
+def _finalize_scan_job() -> None:
+    registry = _scan_job_registry()
+    return_code = registry["proc"].poll()
+    lines = _read_log_tail_lines(registry["log_path"])
+    st.session_state.scan_market_logs = lines
+    st.session_state.scan_market_last_returncode = return_code
     if return_code == 0:
         st.session_state.scan_progress_value = 1.0
         st.session_state.scan_progress_text = "SCAN 완료 | CHART 완료"
-        scan_progress_box.progress(1.0, text=st.session_state.scan_progress_text)
     else:
         st.session_state.scan_progress_text = "스캔 실패"
-        scan_progress_box.progress(float(st.session_state.scan_progress_value), text=st.session_state.scan_progress_text)
+    st.session_state.scan_market_latest_dir = get_scan_status(OUTPUT_DIR).get("latest_scan_dir")
+    st.session_state.scan_market_running = False
+    st.rerun()
 
-    live.empty()
-    return logs, return_code
+
+def render_scan_job_status() -> None:
+    """파일 로그의 마지막 일부와 진행률만 읽어 표시한다. 스캔 자체는 별도 프로세스에서 실행된다."""
+    registry = _scan_job_registry()
+    lines = _read_log_tail_lines(registry["log_path"])
+    value, text = _parse_scan_progress(lines)
+    st.session_state.scan_progress_value = value
+    st.session_state.scan_progress_text = text
+    st.progress(value, text=text)
+    _render_live_log(st.empty(), lines, max_lines=SCAN_LIVE_LOG_LINES)
+
+    if not is_scan_job_running():
+        _finalize_scan_job()
 
 
 def build_mock_chart_data(days: int = 80) -> pd.DataFrame:
@@ -2227,12 +2269,23 @@ def get_data_status(data_dir: str) -> dict:
     }
 
     master_csv = os.path.join(data_dir, "master", "kospi_tickers.csv")
+    code_market: dict = {}
+    market_names = ("KOSPI", "KOSDAQ", "ETF")
+    status["markets"] = {
+        m: {"count": 0, "file_count": 0, "latest_trade_date": None,
+            "latest_collection_date": None, "latest_collection_time": None, "_key": None}
+        for m in market_names
+    }
     if os.path.isfile(master_csv):
         try:
-            mdf = pd.read_csv(master_csv)
+            mdf = pd.read_csv(master_csv, dtype={"code": str})
             market_series = mdf.get("market", pd.Series(dtype=str)).fillna("").astype(str).str.upper()
             status["kospi_count"] = int((market_series == "KOSPI").sum())
             status["kosdaq_count"] = int((market_series == "KOSDAQ").sum())
+            for code, mk in zip(mdf["code"].astype(str).str.zfill(6), market_series):
+                grp = "KOSDAQ" if mk.startswith("KOSDAQ") else ("ETF" if mk.startswith("ETF") else "KOSPI")
+                code_market[code] = grp
+                status["markets"][grp]["count"] += 1
         except Exception:
             pass
 
@@ -2247,16 +2300,34 @@ def get_data_status(data_dir: str) -> dict:
     latest_collection = None
     latest_collection_time = None
     latest_collection_key = None
+    counted_codes: set = set()
     for file_name in daily_files:
         last_line = _read_last_non_empty_line(os.path.join(daily_dir, file_name))
         if not last_line:
             continue
 
         cols = [c.strip() for c in last_line.split(",")]
+        file_code = file_name.split("_", 1)[0]
+        mstat = status["markets"].get(code_market.get(file_code))
+        # 종목명 변경으로 남은 옛 파일·상폐 파일은 제외하고, 마스터 종목 코드당 1회만 집계한다.
+        if mstat is not None and file_code not in counted_codes:
+            counted_codes.add(file_code)
+            mstat["file_count"] += 1
         if cols:
             trade_date = cols[0]
             if trade_date and (latest_trade is None or trade_date > latest_trade):
                 latest_trade = trade_date
+            if mstat is not None and trade_date and (
+                mstat["latest_trade_date"] is None or trade_date > mstat["latest_trade_date"]
+            ):
+                mstat["latest_trade_date"] = trade_date
+
+        if len(cols) >= 15 and cols[13] and cols[14] and mstat is not None:
+            key = f"{cols[13]} {cols[14]}"
+            if mstat["_key"] is None or key > mstat["_key"]:
+                mstat["_key"] = key
+                mstat["latest_collection_date"] = cols[13]
+                mstat["latest_collection_time"] = cols[14]
 
         if len(cols) >= 14:
             collection_date = cols[13]
@@ -3019,6 +3090,8 @@ if "data_store_running" not in st.session_state:
     st.session_state.data_store_running = False
 if "data_store_run_requested" not in st.session_state:
     st.session_state.data_store_run_requested = False
+if "data_store_target" not in st.session_state:
+    st.session_state.data_store_target = ["KOSPI", "KOSDAQ", "ETF"]
 if "scan_market_running" not in st.session_state:
     st.session_state.scan_market_running = False
 if "scan_market_run_requested" not in st.session_state:
@@ -3198,32 +3271,47 @@ if not st.session_state.show_intro:
             st.session_state.data_store_running = True
             st.rerun()
 
-        col_run, col_clear = st.columns([1, 1])
-        latest_collection_date = data_status.get("latest_collection_date")
-        latest_collection_time = data_status.get("latest_collection_time")
+        market_labels = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ", "ETF": "ETF"}
         today_text = date.today().strftime("%Y-%m-%d")
-        same_day_after_5 = (
-            latest_collection_date == today_text
-            and isinstance(latest_collection_time, str)
-            and latest_collection_time >= "17:00"
-        )
 
-        run_button_label = "데이터 업데이트 실행"
-        if st.session_state.awaiting_update_confirm:
-            run_button_label = "확인: 데이터 최신, 다시 눌러 업데이트"
-        if st.session_state.data_store_running:
-            run_button_label = "데이터 업데이트 실행중..."
+        st.markdown("##### 시장별 현황")
+        status_cols = st.columns(3, gap="medium")
+        for scol, mkey in zip(status_cols, market_labels):
+            mstat = data_status["markets"][mkey]
+            with scol:
+                st.markdown(
+                    f"<div class='status-card data-card'><div class='status-title'>{mkey}</div>"
+                    f"<div class='status-value'>{mstat['file_count']:,} / {mstat['count']:,}종목</div>"
+                    f"<div class='status-title'>저장 일자: {mstat['latest_trade_date'] or '-'}</div>"
+                    f"<div class='status-title'>수집: {mstat['latest_collection_date'] or '-'} {mstat['latest_collection_time'] or ''}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
-        with col_run:
-            run_clicked = st.button(
-                run_button_label,
-                type="primary",
-                width="stretch",
-                key="run_data_store_button",
-                disabled=st.session_state.data_store_running,
+        def _is_fresh(mkey: str) -> bool:
+            mstat = data_status["markets"][mkey]
+            return (
+                mstat["latest_collection_date"] == today_text
+                and isinstance(mstat["latest_collection_time"], str)
+                and mstat["latest_collection_time"] >= "17:00"
             )
-        with col_clear:
-            clear_clicked = st.button("로그 지우기", width="stretch", disabled=st.session_state.data_store_running)
+
+        running = st.session_state.data_store_running
+        btn_cols = st.columns(4)
+        clicked_target = None
+        for bcol, (mkey, mlabel) in zip(btn_cols[:3], market_labels.items()):
+            label = f"{mlabel} 업데이트"
+            if st.session_state.awaiting_update_confirm == mkey:
+                label = f"확인: {mlabel} 최신, 다시 눌러 업데이트"
+            if running and st.session_state.data_store_target == [mkey]:
+                label = f"{mlabel} 업데이트 실행중..."
+            with bcol:
+                if st.button(label, type="primary", width="stretch", key=f"run_data_store_{mkey}", disabled=running):
+                    clicked_target = mkey
+        with btn_cols[3]:
+            if st.button("전체 업데이트", width="stretch", key="run_data_store_ALL", disabled=running):
+                clicked_target = "ALL"
+        clear_clicked = st.button("로그 지우기", width="stretch", disabled=running)
 
         if clear_clicked:
             st.session_state.data_store_logs = []
@@ -3237,13 +3325,14 @@ if not st.session_state.show_intro:
             text=st.session_state.data_store_progress_text,
         )
 
-        execute_update = False
-
-        if run_clicked:
-            if same_day_after_5 and not st.session_state.awaiting_update_confirm:
-                st.session_state.awaiting_update_confirm = True
+        if clicked_target:
+            targets = list(market_labels) if clicked_target == "ALL" else [clicked_target]
+            already_fresh = all(_is_fresh(m) for m in targets)
+            if already_fresh and st.session_state.awaiting_update_confirm != clicked_target:
+                st.session_state.awaiting_update_confirm = clicked_target
             else:
                 st.session_state.awaiting_update_confirm = False
+                st.session_state.data_store_target = targets
                 st.session_state.data_store_run_requested = True
                 st.rerun()
 
@@ -3251,11 +3340,14 @@ if not st.session_state.show_intro:
             st.warning("데이터가 최신 입니다. 그래도 업데이트 하시겠습니까? 실행 버튼을 한 번 더 누르세요.")
 
         if st.session_state.data_store_running:
-            run_status_box.info("data_store.py 실행중입니다.")
+            run_status_box.info(f"data_store.py 실행중입니다. ({', '.join(st.session_state.data_store_target)})")
             st.session_state.data_store_progress_value = 0.0
             st.session_state.data_store_progress_text = "전체 0.00% (RAW 0.00% + DERIVED 0.00%) | 시작"
             data_progress_box.progress(0.0, text=st.session_state.data_store_progress_text)
-            logs, return_code = run_data_store_and_collect_logs(data_progress_box)
+            logs, return_code = run_data_store_and_collect_logs(
+                data_progress_box, st.session_state.data_store_target
+            )
+            get_data_status.clear()
             st.session_state.data_store_logs = logs
             st.session_state.data_store_last_returncode = return_code
             st.session_state.data_store_running = False
@@ -3281,6 +3373,7 @@ if not st.session_state.show_intro:
 
         if st.session_state.scan_market_run_requested and not st.session_state.scan_market_running:
             st.session_state.scan_market_run_requested = False
+            start_scan_job()
             st.session_state.scan_market_running = True
             st.rerun()
 
@@ -3341,29 +3434,17 @@ if not st.session_state.show_intro:
         elif not st.session_state.scan_market_logs and not execute_scan:
             run_status_box.info("스캔 실행 전입니다. 버튼을 눌러 진행상황 로그를 확인하세요.")
 
+        # 다른 세션/새로고침 후에도 실행 중인 백그라운드 스캔에 다시 연결한다.
+        if is_scan_job_running():
+            st.session_state.scan_market_running = True
+
         if st.session_state.scan_market_running:
-            run_status_box.info("scan_market.py 실행중입니다.")
-            st.session_state.scan_progress_value = 0.0
-            st.session_state.scan_progress_text = "스캔 시작"
-            scan_progress_box.progress(0.0, text=st.session_state.scan_progress_text)
-            logs, return_code = run_scan_market_and_collect_logs(scan_progress_box)
-            st.session_state.scan_market_logs = logs
-            st.session_state.scan_market_last_returncode = return_code
-            latest_scan_status = get_scan_status(OUTPUT_DIR)
-            st.session_state.scan_market_latest_dir = latest_scan_status.get("latest_scan_dir")
-            st.session_state.scan_market_running = False
-
-            scan_progress_box.progress(
-                float(st.session_state.scan_progress_value),
-                text=st.session_state.scan_progress_text,
-            )
-
-            if return_code == 0:
-                run_status_box.success("스캔이 완료되었습니다.")
-            else:
-                run_status_box.error(f"스캔 실행 중 오류가 발생했습니다. 종료 코드: {return_code}")
-
-        if st.session_state.scan_market_logs:
+            run_status_box.info("scan_market.py 백그라운드 실행중입니다. 다른 메뉴로 이동해도 계속 진행됩니다.")
+            scan_progress_box.empty()
+            st.fragment(run_every=SCAN_REFRESH_SEC)(render_scan_job_status)()
+        elif st.session_state.scan_market_last_returncode == 0:
+            run_status_box.success("스캔이 완료되었습니다.")
+        if st.session_state.scan_market_logs and not st.session_state.scan_market_running:
             if st.session_state.scan_market_last_returncode == 0:
                 latest_dir = st.session_state.scan_market_latest_dir or scan_status.get("latest_scan_dir")
                 if latest_dir:

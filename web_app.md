@@ -90,9 +90,11 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 
 ### 5.2 스캔 실행
 
-- [scripts/scan_market.py](scripts/scan_market.py)를 subprocess로 실행
-- 로그 패턴에서 SCAN/CHART 진행률 파싱
-- 완료 후 최신 스캔 폴더 상태 갱신
+- [scripts/scan_market.py](scripts/scan_market.py)를 백그라운드 subprocess로 실행하고 stdout/stderr를 임시 로그 파일에 기록
+- 프로세스 핸들은 `st.cache_resource`로 서버 전체에서 공유하므로, 메뉴 이동·새로고침 후에도 실행 중인 스캔에 다시 연결됨
+- `st.fragment(run_every=1)`가 1초마다 로그 파일의 끝 일부(256KB)만 읽어 SCAN/CHART 진행률과 마지막 24줄만 표시 (메뉴 이동이 막히지 않음)
+- 종료 감지 시 로그/종료 코드/최신 스캔 폴더를 session_state에 반영하고 전체 화면을 한 번 재실행
+- 데이터 저장(1번) 로그 루프는 출력이 없을 때 `time.sleep(0.05)`를 두고, 라이브 로그 렌더링을 0.5초 단위로 제한
 
 ### 5.3 스캔 결과 조회
 
