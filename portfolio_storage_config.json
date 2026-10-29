@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "root": "D:\\OneDrive\\KRX_Portfolio",
+  "main": "main",
+  "daily": "daily",
+  "dividends": "dividends",
+  "server_url": "http://127.0.0.1:8765"
+}

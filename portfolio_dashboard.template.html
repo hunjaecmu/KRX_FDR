@@ -1,0 +1,375 @@
+<!doctype html>
+
+<html lang="ko">
+
+<head>
+
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+
+<meta name="color-scheme" content="light"><title>KRX 포트폴리오 · 로컬 대시보드</title>
+
+<style>
+
+:root{font-family:"Segoe UI","Malgun Gothic",sans-serif;color:#182c43;background:#f3f6fa;font-size:14px;--ink:#182c43;--muted:#748398;--line:#e3eaf1;--blue:#2369e9;--green:#087e77;--up:#c84849;--down:#3074bd}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:9px;background:#fff;padding:10px 15px;color:var(--ink)}button:hover{background:#eff4fc;border-color:#b0c6ed}button:disabled{opacity:.5;cursor:wait}button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}input,select{border:1px solid #d8e1ed;border-radius:8px;padding:11px;background:#fff;min-width:0;color:var(--ink)}input:focus,select:focus,button:focus-visible{outline:3px solid #aacaff;outline-offset:2px}.layout{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:100vh}.sidebar{background:#142b44;color:#d4e0f1;padding:32px 20px;display:flex;flex-direction:column;gap:28px}.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:19px;color:#fff}.brandmark{display:grid;place-items:center;width:34px;height:34px;background:#2e76ee;border-radius:10px;font-size:20px}.brand small{display:block;font-size:10px;letter-spacing:1.9px;color:#91a9c5;font-weight:400;margin-top:6px}.sidebar nav{display:grid;gap:8px}.nav{background:transparent;color:#aebfd4;text-align:left;border:0;padding:14px;border-radius:10px}.nav.active{background:#254968;color:#fff}.nav:hover{background:#25415e;border-color:transparent}.nav span{display:inline-block;width:26px}.side-bottom{margin-top:auto;padding:18px 8px 0;border-top:1px solid #30465f;font-size:12px;line-height:1.9;color:#9fb1c7}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#5cdbc2;margin-right:6px}.main{padding:32px 40px;max-width:1600px;width:100%;margin:auto}.topline{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:32px}.eyebrow{font-size:11px;letter-spacing:1.7px;font-weight:700;color:var(--muted)}.top-actions{display:flex;gap:8px}.pill{display:inline-block;padding:6px 10px;background:#edf3fb;color:#526986;border-radius:6px;font-size:11px}.titlebar{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;margin:0 0 24px}h1{font-size:29px;letter-spacing:-1.2px;line-height:1.4;margin:0 0 9px}h2{font-size:17px;margin:0}h3{font-size:15px;margin:0 0 14px}.muted{color:var(--muted);font-size:12px;line-height:1.8}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:24px}.metric{background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px}.metric label{font-size:12px;color:var(--muted)}.metric strong{display:block;font-size:27px;letter-spacing:-.8px;margin:10px 0 5px;font-variant-numeric:tabular-nums}.metric small{color:var(--muted);font-size:11px}.panel{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:22px}.panel-head{padding:20px 22px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line)}.panel-body{padding:22px}.columns{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.85fr);gap:22px}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.toolbar input{flex:1;min-width:180px}.tabs{display:flex;gap:5px;flex-wrap:wrap}.tabs button{padding:7px 10px;border-color:transparent;color:#687b94;font-size:12px}.tabs button.active{color:var(--blue);background:#edf3ff}.stock-title{display:flex;align-items:center;gap:10px}.stock-price{font-size:34px;font-weight:700;letter-spacing:-1px;font-variant-numeric:tabular-nums;margin:13px 0 5px}.up{color:var(--up)}.down{color:var(--down)}.flat{color:#738195}.chart-shell{position:relative;height:295px;margin-top:14px}.chart-shell canvas{width:100%;height:100%;display:block}.chart-tip{position:absolute;pointer-events:none;background:#19324c;color:#fff;border-radius:7px;padding:9px 12px;font-size:12px;box-shadow:0 3px 12px #172b4330;display:none;white-space:nowrap}.chart-foot{border-top:1px solid var(--line);padding-top:12px;display:flex;justify-content:space-between;gap:10px;font-size:11px;color:var(--muted);line-height:1.7}.facts{display:grid;gap:0}.fact{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #edf1f6;padding:13px 0;font-size:12px}.fact span{color:var(--muted)}.fact b{text-align:right;font-weight:500}.notice{background:#f4f8fd;border:1px solid #e3ebf6;border-radius:9px;padding:13px 15px;font-size:12px;line-height:1.85;color:#60738b;margin-top:16px}.notice.warn{background:#fff9ed;border-color:#f0e2c5;color:#85682c}table{border-collapse:collapse;width:100%;font-size:12px}th{text-align:left;font-weight:500;color:#7d8c9f;background:#f8fafc;padding:12px 17px;border-bottom:1px solid var(--line);white-space:nowrap}td{padding:13px 17px;border-bottom:1px solid #edf1f5;font-variant-numeric:tabular-nums}td.num,th.num{text-align:right}.stock-row{cursor:pointer}.stock-row:hover{background:#f4f8ff}.stock-row.selected{background:#eef5ff}.name-cell b{display:block;font-size:13px;margin-bottom:4px}.name-cell small{color:#8a99ac}.table-scroll{overflow:auto;max-height:610px}.table-foot{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;font-size:12px;color:var(--muted)}.view[hidden]{display:none}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}.field{display:grid;gap:7px;font-size:12px;color:#61728a}.field.wide{grid-column:1/-1}.form-end{margin-top:18px;display:flex;gap:10px;justify-content:flex-end}.empty{padding:35px;text-align:center;color:var(--muted);font-size:13px;line-height:1.9}.actions-cell button{padding:6px 9px;font-size:11px}.file-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.hidden-input{display:none}.toast{position:fixed;bottom:25px;right:25px;background:#17334d;color:white;padding:14px 20px;border-radius:10px;max-width:min(560px,90vw);box-shadow:0 6px 25px #172a4533;z-index:10;font-size:13px;line-height:1.7}.danger{color:#ab4851}.badge{padding:3px 7px;border-radius:5px;background:#f0f4f9;font-size:10px;color:#6c8199}.tools-note{font-size:12px;color:var(--muted);line-height:1.9}footer{margin-top:16px;color:#91a0b1;font-size:11px;line-height:1.9}.data-date{font-size:11px;color:#7689a0}.mini-action{font-size:11px;padding:6px 9px}.history-summary{margin:16px 0 0;font-size:12px;color:#697e97}.account-list{display:grid;gap:10px;margin-top:16px}.account-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px;background:#f7f9fc;border-radius:8px;font-size:12px}.account-item b{display:block;margin-bottom:4px}code{font-size:12px;word-break:break-all}details{margin-top:16px;font-size:12px;line-height:1.9}summary{cursor:pointer;color:#60738b}@media(max-width:1100px){.sidebar{padding:24px 12px}.layout{grid-template-columns:185px minmax(0,1fr)}.main{padding:25px}.columns{grid-template-columns:1fr}.metrics{gap:10px}.metric{padding:16px}.metric strong{font-size:23px}}@media(max-width:750px){.layout{display:block}.sidebar{padding:16px 18px;gap:14px}.sidebar nav{display:flex;gap:4px}.nav{padding:10px}.brand small,.side-bottom{display:none}.main{padding:20px 15px}.topline{margin-bottom:20px}.eyebrow{font-size:10px}.top-actions button{padding:8px;font-size:11px}.titlebar{align-items:flex-start;flex-direction:column}h1{font-size:25px}.metrics{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr 1fr}.file-grid{grid-template-columns:1fr}.panel-head{padding:17px}.panel-body{padding:17px}.chart-shell{height:260px}td,th{padding:12px}.nav span{display:none}}
+
+
+
+[hidden]{display:none!important}.account-row{cursor:pointer}.account-row:hover{background:#f1f6ff}.account-row:focus{outline:2px solid #8bb6ff;outline-offset:-2px}.account-table{min-width:1310px}.account-table td{padding-top:17px;padding-bottom:17px}.account-table .num{min-width:145px}.account-table .name-cell{min-width:170px}.ratio{display:grid;gap:7px;justify-items:end;min-width:65px}.ratio b{font-weight:600;font-size:13px}.ratio>span{width:66px;height:4px;background:#edf1f7;border-radius:5px;overflow:hidden}.ratio i{display:block;height:100%;background:#447fe6;border-radius:5px}.allocation-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:26px}.allocation-item{display:flex;justify-content:space-between;gap:15px;font-size:13px}.allocation-item .ratio{min-width:80px}.back-button{padding:0;border:0;background:transparent;color:#6d829d;margin-bottom:14px}.position-table{min-width:1000px}.position-table td,.position-table th{padding:13px 11px}.badge.growth{background:#eaf1ff;color:#3c69b3}.badge.dividend{background:#e8f5ee;color:#267d53}.section-divider{height:1px;background:var(--line);margin:22px 0}.metric strong{overflow-wrap:anywhere;font-size:23px}@media(max-width:750px){.allocation-grid{grid-template-columns:1fr 1fr;gap:20px}.metric strong{font-size:20px}}
+
+.market-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:1100px){.market-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:750px){.market-metrics{grid-template-columns:1fr 1fr}}
+
+dialog{border:1px solid var(--line);border-radius:14px;width:min(560px,92vw);padding:0;color:var(--ink);line-height:1.8}dialog::backdrop{background:#10283e66}.launcher-link{display:inline-block;background:var(--blue);color:white;padding:11px 17px;border-radius:8px;text-decoration:none}#marketUpdateStatus{margin:0 0 18px}
+
+.amount-share{white-space:nowrap}.amount-share b{font-size:13px}.amount-share .muted{font-size:12px}.account-total-row th,.account-total-row td{background:#eef3fb;border-top:2px solid #ccd8e9}.account-total-row .name-cell small{display:block;font-weight:400;margin-top:5px}
+
+.account-overview-scroll{max-height:none}
+.sidebar-fx{border-top:1px solid #30465f;padding-top:20px;min-width:0}.sidebar-fx h3{font-size:13px;color:#eef4fc;margin:0 0 15px}.sidebar-fx .sidebar-fx-grid{grid-template-columns:1fr;gap:12px}.sidebar-fx .field{color:#b4c6dc;font-size:11px}.sidebar-fx input{width:100%;background:#203c59;color:#f1f6fd;border-color:#3e5a78;padding:10px;color-scheme:dark}.sidebar-fx input::placeholder{color:#8da4bf}.sidebar-fx .form-end{margin-top:12px}.sidebar-fx button{width:100%;background:#254968;color:#eef4fc;border-color:#3d6084;font-size:12px}.sidebar-fx #fxStatus{color:#a5b9d2;font-size:11px;line-height:1.7;margin-top:13px;overflow-wrap:anywhere}@media(max-width:750px){.sidebar-fx{padding-top:15px}.sidebar-fx .sidebar-fx-grid{grid-template-columns:1fr 1fr}.sidebar-fx .form-end{justify-content:flex-start}.sidebar-fx button{width:auto}}
+.dividend-input-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dividend-holdings-table{min-width:1050px}.dividend-schedule-scroll{max-height:none}#view-dividends .metric small{display:block;line-height:1.6;overflow-wrap:anywhere}@media(max-width:750px){.sidebar nav{flex-wrap:wrap}.dividend-input-grid{grid-template-columns:1fr}}
+
+.overview-metrics{grid-template-columns:minmax(0,1.1fr) minmax(0,1.5fr) minmax(0,1.6fr) minmax(0,.8fr);align-items:stretch;margin-bottom:10px}.overview-metrics .metric{min-width:0;padding:18px}.overview-title{font-size:13px;font-weight:600;line-height:1.6;color:#526986;margin:0 0 16px}.overview-total>strong{font-size:clamp(20px,1.8vw,28px);line-height:1.5;margin:15px 0 8px}.overview-metrics small{display:block;line-height:1.7}.overview-day,.overview-counts{margin:22px 0 12px}.overview-day>div{margin-bottom:16px}.overview-day dt,.overview-counts dt{font-size:11px;color:var(--muted);line-height:1.6}.overview-day dd{margin:4px 0 0;font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.overview-counts>div{display:flex;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid #edf1f5}.overview-counts dd{margin:0;white-space:nowrap;color:#6b7b90;font-size:11px}.overview-counts b{font-size:17px;color:var(--ink);margin-right:4px}.overview-matrix{table-layout:fixed;font-size:11px}.overview-matrix th,.overview-matrix td{padding:12px 5px;white-space:normal;text-align:right;vertical-align:middle}.overview-matrix th:first-child{width:48px;text-align:left}.overview-matrix tbody th{background:#f8fafc;font-size:11px;color:#526986}.overview-matrix thead th{font-size:11px}.overview-matrix td{background:#f6f9fe;border-left:3px solid white;border-bottom:3px solid white;border-radius:6px}.matrix-amount{display:block;font-size:12px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;line-height:1.65}.matrix-change{display:block;margin-top:5px;font-size:12px}.overview-matrix small{font-size:10px}.overview-hint,.overview-method{color:var(--muted);font-size:10px;line-height:1.8;margin:12px 0 0}.overview-method{font-size:11px;margin:0 0 22px}.overview-ratios{display:grid;gap:13px}.overview-ratio-heading{font-size:10px;color:#75859a;margin-bottom:5px}.overview-ratio-values{display:flex;justify-content:space-between;gap:7px;font-size:11px;line-height:1.6}.overview-ratio-values b{font-variant-numeric:tabular-nums;font-size:12px}.overview-ratio-values>span:first-child b{color:#356cbe}.overview-ratio-values>span:nth-child(2) b{color:#168476}.overview-ratio-track{height:4px;background:#edf1f6;border-radius:3px;display:flex;overflow:hidden;margin-top:5px}.overview-ratio-track i{height:100%;background:#4b83d6}.overview-ratio-track i+i{background:#37a69a}@media(max-width:1250px){.overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-total>strong{font-size:27px}}@media(max-width:650px){.overview-metrics{grid-template-columns:minmax(0,1fr)}.overview-metrics .metric{padding:18px}.overview-day{display:flex;flex-wrap:wrap;gap:22px}.overview-day>div{margin-bottom:0}.overview-counts{margin-top:0}.overview-matrix th:first-child{width:64px}.matrix-amount{font-size:14px}}
+.overview-ratio-values.with-cash{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.overview-ratio-values.with-cash>span{display:flex;flex-wrap:wrap;gap:2px 4px}.overview-ratio-values>span.cash b{color:#a5751c}.overview-ratio-track i.cash{background:#d4a54f}
+.dividend-account-group th{background:#eaf1fb;color:#294b70;padding:15px 17px;border-top:2px solid #d5e2f3}.dividend-account-group b{font-size:13px}.dividend-account-group span{font-size:11px;font-weight:400;color:#647d9c;margin-left:14px}.dividend-account-total th,.dividend-account-total td{background:#f4f8fc;border-bottom:2px solid #dfe8f2;padding-top:14px;padding-bottom:14px}.dividend-account-total th{color:#3f5977;font-weight:600;white-space:normal}.dividend-account-total small{display:block;color:#7a8ca2;font-size:10px;font-weight:400;margin-top:4px}.dividend-account-total td b{font-size:12px}.dividend-account-total .data-date{font-weight:400}@media(max-width:750px){.dividend-account-group span{display:block;margin:4px 0 0}}
+.dividend-overview{grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch}.dividend-overview>.metric{min-width:0;padding:18px}.dividend-matrix-card{grid-column:span 2}.dividend-matrix-card .overview-title{margin-bottom:5px}.dividend-matrix-scroll{overflow:auto;max-height:370px;margin-top:12px;border:1px solid var(--line);border-radius:7px}.dividend-matrix{width:max-content;min-width:100%;font-size:11px}.dividend-matrix th,.dividend-matrix td{padding:10px 12px;min-width:90px;white-space:nowrap}.dividend-matrix th:first-child{position:sticky;left:0;min-width:120px;max-width:170px;white-space:normal;background:#f8fafc;z-index:1;color:#526986}.dividend-matrix thead th{position:sticky;top:0;background:#f1f6fc;z-index:2}.dividend-matrix thead th:first-child{z-index:3}.dividend-matrix td{font-variant-numeric:tabular-nums}.dividend-matrix tfoot td,.dividend-matrix tfoot th{background:#eef4fc;font-weight:600;border-top:2px solid #dce6f2}.dividend-matrix .dividend-matrix-total{background:#f3f8fd}.dividend-matrix .data-date{font-size:10px;font-weight:400}.dividend-status-card .overview-counts{margin-top:0}.dividend-total-card>strong{font-size:clamp(20px,1.8vw,28px)}@media(max-width:1100px){.dividend-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.dividend-matrix-card{grid-column:1/-1;grid-row:2}.dividend-status-card{grid-column:2;grid-row:1}}@media(max-width:650px){.dividend-overview{grid-template-columns:minmax(0,1fr)}.dividend-matrix-card,.dividend-status-card{grid-column:auto;grid-row:auto}}
+.dividend-matrix span.data-date{display:block}.receipt-table{min-width:1050px}.receipt-monthly-table{min-width:1000px}#receiptForm .form-end{flex-wrap:wrap}#receiptHistoryYear{width:120px}#receiptForm h3{margin-top:0}
+</style>
+
+</head>
+
+<body>
+
+<div class="layout">
+
+<aside class="sidebar"><div class="brand"><div class="brandmark">↗</div><div>KRX Portfolio<small>PERSONAL WORKSPACE</small></div></div>
+
+<nav aria-label="주요 메뉴"><button class="nav" data-view="market"><span>◈</span>시장·종목</button><button class="nav active" data-view="portfolio"><span>▥</span>계좌 대시보드</button><button class="nav" data-view="dividends"><span>◷</span>배당주 관리</button><button class="nav" data-view="files"><span>▤</span>기록·파일</button></nav>
+
+<section class="sidebar-fx" aria-labelledby="fxSettingsTitle"><form id="fxForm"><h3 id="fxSettingsTitle">환율 설정</h3><div class="form-grid sidebar-fx-grid"><label class="field">USD 1당 원화<input id="fxRate" type="number" min="0.000001" step="any" placeholder="USD 1당 원화"></label><label class="field">환율 기준일<input id="fxDate" type="date"></label></div><div class="form-end"><button type="submit">환율 저장</button></div><div class="muted" id="fxStatus"></div></form></section>
+<div class="side-bottom"><span class="dot"></span>LOCAL DATA<br>FinanceDataReader 기반<br>KOSPI · KOSDAQ · ETF<br><br>원본 CSV는 보존하고<br>조회용 HTML을 생성합니다.<br><br><span id="sideGenerated"></span></div></aside>
+
+<main class="main">
+
+<div class="topline"><div class="eyebrow">YOUR MARKET, YOUR RECORD.</div><div class="top-actions"><span id="saveState" class="pill">빈 포트폴리오</span><button id="importTop">JSON 불러오기</button><button class="primary" id="exportTop">JSON 내보내기</button></div></div>
+
+<section class="view" id="view-market" hidden>
+
+<div class="titlebar"><div><h1>국내 자산 포트폴리오</h1><div class="muted">기존 KRX_FDR 데이터를 연결해 종목과 가격의 흐름을 살펴봅니다.</div></div><div class="toolbar"><span class="pill" id="connection">저장 시세 · 실시간 아님</span><button class="primary" id="marketUpdate">종목 업데이트 / 서버 실행</button></div></div>
+
+<p class="muted" id="marketUpdateStatus" role="status" aria-live="polite">종목 업데이트는 기존 CSV의 마스터·시세를 다시 반영합니다. 선택 종목의 새 온라인 시세는 아래 개별 갱신 버튼을 사용하세요.</p><div class="metrics market-metrics"><div class="metric"><label>KOSPI 종목</label><strong id="kospiCount">—</strong><small>등록 종목</small></div><div class="metric"><label>KOSDAQ 종목</label><strong id="kosdaqCount">—</strong><small>GLOBAL 구분 포함</small></div><div class="metric"><label>국내 상장 ETF</label><strong id="etfCount">—</strong><small>ETF/KR 마스터 연결</small></div><div class="metric"><label>가격 조회 가능</label><strong id="cachedCount">—</strong><small>로컬 CSV 연결</small></div><div class="metric"><label>최신 자료 날짜</label><strong id="latestDate" style="font-size:23px">—</strong><small id="dateCoverage">종목마다 기준일 확인</small></div></div>
+
+<div class="columns"><section class="panel"><div class="panel-head"><div class="stock-title"><h2 id="selectedName">종목 선택</h2><span class="badge" id="selectedMarket">—</span></div><button id="refreshPrice" class="mini-action" disabled>선택 종목 온라인 갱신</button></div><div class="panel-body"><div class="muted" id="selectedCode">—</div><div class="stock-price" id="selectedPrice">—</div><div id="selectedChange" class="data-date">저장 시세를 불러옵니다.</div><div class="toolbar" style="justify-content:space-between;margin-top:20px"><div class="tabs" id="rangeTabs"><button data-range="1M">1개월</button><button data-range="3M">3개월</button><button data-range="1Y" class="active">1년</button><button data-range="3Y">3년</button><button data-range="ALL">전체</button></div><select id="frequency" aria-label="가격 차트 주기"><option value="D">일별</option><option value="W">주별</option><option value="M">월별</option></select></div><div class="chart-shell"><canvas id="priceChart" aria-label="선택 종목 가격 차트" role="img"></canvas><div class="chart-tip" id="priceTip"></div></div><div class="chart-foot"><span id="chartPeriod">가격 이력을 불러옵니다.</span><span>KRW · 저장 가격 기준</span></div><div class="history-summary" id="historyStatus"></div></div></section>
+
+<section class="panel"><div class="panel-head"><h2>데이터 확인</h2><span class="pill">SOURCE</span></div><div class="panel-body"><div class="facts" id="stockFacts"></div><div class="notice">표시 가격은 기존 CSV의 마지막 유효 가격입니다. 장중 데이터가 포함될 수 있으며 체결 가능한 실시간 가격을 뜻하지 않습니다.</div><div class="notice warn" id="staleNotice" hidden></div><details><summary>새로운 시세를 불러오는 방법</summary><p>HTML을 직접 열면 저장 자료를 조회합니다. 온라인 갱신 버튼은 아래 명령으로 실행한 로컬 화면에서 사용할 수 있습니다.</p><code>python portfolio_dashboard.py --serve</code><p>기존 배치가 CSV를 갱신한 후에는 <code>python portfolio_dashboard.py</code>로 HTML을 다시 생성하세요.</p></details></div></section></div>
+
+<section class="panel"><div class="panel-head"><h2>종목 탐색</h2><span class="muted" id="searchCount"></span></div><div class="panel-body" style="padding-bottom:16px"><div class="toolbar"><input id="search" type="search" placeholder="종목명 또는 코드로 검색" aria-label="종목 검색"><select id="marketFilter" aria-label="시장 선택"><option value="ALL">전체 시장</option><option value="KOSPI">KOSPI</option><option value="KOSDAQ">KOSDAQ</option><option value="ETF">국내 상장 ETF</option></select><select id="sort" aria-label="정렬"><option value="code">종목코드순</option><option value="name">이름순</option><option value="change_desc">등락률 높은순</option><option value="change_asc">등락률 낮은순</option></select></div></div><div class="table-scroll"><table><thead><tr><th>종목</th><th>시장</th><th class="num">저장 최신가</th><th class="num">직전 기록 대비</th><th>가격 기준일</th><th>포트폴리오</th></tr></thead><tbody id="marketRows"></tbody></table></div><div class="table-foot"><span id="paginationLabel"></span><div><button id="prevPage" class="mini-action">이전</button> <button id="nextPage" class="mini-action">다음</button></div></div></section>
+
+</section>
+
+<section class="view" id="view-portfolio"><div class="titlebar"><div><h1>계좌 대시보드</h1><div class="muted">여덟 계좌의 자산과 투자 구성을 한눈에 확인하세요. 계좌 행을 누르면 종목별 상세 내역으로 이동합니다.</div></div><button id="capture" class="primary">오늘 평가 기록 저장</button></div>
+
+<div class="metrics overview-metrics">
+ <section class="metric overview-total" aria-labelledby="overviewTotalTitle"><h2 id="overviewTotalTitle" class="overview-title">총액 · 원화 환산</h2><strong id="portfolioValue">미입력</strong><small id="portfolioCoverage">실제 잔고를 입력하세요.</small><dl class="overview-day"><div><dt>전일 대비 증가율</dt><dd id="portfolioDayPct">—</dd></div><div><dt>전일 대비 증가액</dt><dd id="portfolioDayAmount">—</dd></div></dl><small id="portfolioDayPeriod"></small></section>
+ <section class="metric" aria-labelledby="overviewMatrixTitle"><h2 id="overviewMatrixTitle" class="overview-title">성장·배당 × 한국·미국</h2><table class="overview-matrix" aria-label="성장주·배당주의 한국·미국 자산 매트릭스, 금액과 전일 대비 증가율"><thead><tr><th scope="col">구분</th><th scope="col">한국 자산</th><th scope="col">미국 자산</th></tr></thead><tbody id="overviewMatrix"></tbody></table><p class="overview-hint">각 칸: 평가액 · 전일 대비 증가율<br>성장·배당 분류 기준 · 채권 ETF는 배당에 포함</p></section>
+ <section class="metric" aria-labelledby="overviewRatiosTitle"><h2 id="overviewRatiosTitle" class="overview-title">자산 구성 비중</h2><div id="overviewRatios" class="overview-ratios"></div><p class="overview-hint">총액은 현금 포함 · 국가별 자산은 채권 등 포함<br>세 항목에 속하지 않는 자산은 막대의 회색 여백으로 표시합니다.</p></section>
+ <section class="metric" aria-labelledby="overviewStatusTitle"><h2 id="overviewStatusTitle" class="overview-title">등록 현황</h2><dl class="overview-counts"><div><dt>전체 계좌</dt><dd><b id="accountCount">8</b>개</dd></div><div><dt>합계 반영 계좌</dt><dd><b id="overviewIncludedCount">0</b>개</dd></div><div><dt>보유종목 행</dt><dd><b id="holdingCount">0</b>행</dd></div><div><dt>평가 기록</dt><dd><b id="snapshotCount">0</b>건</dd></div></dl><p class="overview-hint">복수 계좌의 같은 종목은 각각 집계합니다.</p></section>
+</div>
+<p class="overview-method">전일 대비는 현재 수량·현금·환율을 고정한 가격 평가액 변화입니다. 입출금·매매·배당·환율 변동을 포함한 실제 일간 수익률과 다릅니다. 비교 날짜가 맞지 않거나 전일가가 없으면 —로 표시합니다.</p>
+
+<section class="panel"><div class="panel-head"><h2>계좌별 자산 구성</h2><span class="pill">ACCOUNT OVERVIEW</span></div><div class="table-scroll account-overview-scroll"><table class="account-table"><thead><tr><th>계좌</th><th class="num">계좌 총액</th><th class="num" title="현재 수량·현금·환율 고정, 전일 시세 대비 평가액 변화">전일 대비</th><th class="num">현금</th><th class="num" title="한국으로 지정한 모든 보유 자산 포함">한국 자산 총액</th><th class="num" title="미국으로 지정한 모든 보유 자산 포함">미국 자산 총액</th><th class="num">성장주 총액</th><th class="num">배당주 총액</th><th>상세</th></tr></thead><tbody id="accountRows"></tbody><tfoot id="accountTotals"></tfoot></table></div><div class="panel-body muted" id="portfolioNote"></div></section>
+
+<section class="panel"><div class="panel-head"><h2>전체 보유 종목</h2><span class="muted">전일 대비는 저장 가격일 기준입니다. 계좌 상세에서도 같은 항목을 표시합니다.</span></div><div class="table-scroll"><table class="position-table"><thead><tr><th>계좌</th><th>종목</th><th>자산 유형</th><th class="num">매입가(평균)</th><th class="num">수량</th><th class="num">현재가</th><th class="num">전일 대비</th><th class="num">평가액</th><th class="num">손익 금액</th><th class="num">손익률</th><th>투자 지역</th><th>성장/배당</th><th>수정</th></tr></thead><tbody id="holdingRows"></tbody></table></div></section></section>
+
+<section class="view" id="view-account" hidden><div class="titlebar"><div><button class="back-button" id="backToAccounts">← 전체 계좌</button><h1 id="detailTitle">계좌 상세</h1><div class="muted" id="detailType"></div></div><span class="pill">ACCOUNT DETAIL</span></div><div class="metrics"><div class="metric"><label>계좌 총액 · 원화 환산</label><strong id="detailTotal">미입력</strong><small>현금 + 보유 종목 평가액</small></div><div class="metric"><label>현금 잔고</label><strong id="detailCashValue">미입력</strong><small>입력 통화 기준</small></div><div class="metric"><label>평가 손익 · 원화 환산</label><strong id="detailProfit">—</strong><small>종목 가격 차이 기준</small></div><div class="metric"><label>평가 손익률</label><strong id="detailProfitPct">—</strong><small>확인한 매입원가 기준</small></div></div><section class="panel"><div class="panel-head"><h2>계좌 구성 비중</h2><span class="muted">현금 포함 총액 기준</span></div><div class="panel-body allocation-grid" id="detailRatios"></div><div class="panel-body muted" style="padding-top:0" id="detailClassification"></div></section>
+
+<section class="panel"><div class="panel-head"><h2>계좌별 보유 종목 상세</h2></div><div class="table-scroll"><table class="position-table"><thead><tr><th>종목</th><th>자산 유형</th><th class="num">매입가(평균)</th><th class="num">수량</th><th class="num">현재가</th><th class="num">전일 대비</th><th class="num">평가액</th><th class="num">손익 금액</th><th class="num">손익률</th><th>투자 지역</th><th>성장/배당</th><th>수정</th></tr></thead><tbody id="detailHoldingsRows"></tbody></table></div><div class="panel-body muted" id="detailNote"></div></section>
+
+<section class="panel"><form class="panel-body toolbar" id="detailCashForm"><label class="field">현금 잔고<input id="detailCash" type="number" min="0" step="any" placeholder="미입력"></label><label class="field">통화<select id="detailCashCurrency"><option value="KRW">KRW · 원</option><option value="USD">USD · 달러</option></select></label><button type="submit">이 계좌 현금 저장</button><span class="muted">기준일은 오늘로 기록합니다.</span></form></section><div id="detailEditorSlot"><section class="panel" id="holdingEditor"><div class="panel-head"><h2>보유 종목 입력·수정</h2><button type="button" id="cancelHoldingEdit" class="mini-action" hidden>수정 취소</button></div><form class="panel-body" id="holdingForm"><div class="form-grid"><label class="field">계좌<select id="holdingAccount" required></select></label><label class="field">종목코드 / 티커<input id="holdingCode" list="tickerOptions" required maxlength="24" placeholder="005930 또는 AAPL"></label><label class="field">종목명<input id="holdingName" maxlength="100" placeholder="코드 조회 또는 직접 입력"></label><label class="field">매입가(평균)<input id="holdingCost" type="number" min="0" step="any" placeholder="선택 · 종목 통화 기준"></label><label class="field">보유 수량<input id="holdingQuantity" type="number" min="0.000001" step="any" required></label><label class="field">시세 방식<select id="holdingPriceMode"><option value="auto">국내 목록 자동</option><option value="manual">직접 입력</option></select></label><label class="field">통화<select id="holdingCurrency"><option value="KRW">KRW · 원</option><option value="USD">USD · 달러</option></select></label><label class="field">지역 · 투자대상<select id="holdingRegion"><option value="KR">한국 자산</option><option value="US">미국 자산</option><option value="OTHER">기타 자산</option><option value="UNKNOWN">미분류</option></select></label><label class="field">자산 유형<select id="holdingAssetClass"><option value="equity">주식형</option><option value="bond">채권형</option><option value="cash">현금성</option><option value="other">기타</option><option value="unknown">미확인</option></select></label><label class="field">성장 / 배당<select id="holdingStyle"><option value="unknown">미분류</option><option value="growth">성장</option><option value="dividend">배당</option></select></label></div><div id="manualPriceFields" class="form-grid manual-fields" style="margin-top:15px" hidden><label class="field">현재가 · 직접 입력<input id="holdingCurrentPrice" type="number" min="0" step="any" placeholder="선택 · 통화 기준"></label><label class="field">가격 기준일<input id="holdingPriceDate" type="date"></label></div><div class="form-grid dividend-input-grid" style="margin-top:15px"><label class="field">매월 예상 배당일<select id="holdingDividendDay"><option value="">일정 미입력</option><option value="1">매월 1일</option><option value="2">매월 2일</option><option value="3">매월 3일</option><option value="4">매월 4일</option><option value="5">매월 5일</option><option value="6">매월 6일</option><option value="7">매월 7일</option><option value="8">매월 8일</option><option value="9">매월 9일</option><option value="10">매월 10일</option><option value="11">매월 11일</option><option value="12">매월 12일</option><option value="13">매월 13일</option><option value="14">매월 14일</option><option value="15">매월 15일</option><option value="16">매월 16일</option><option value="17">매월 17일</option><option value="18">매월 18일</option><option value="19">매월 19일</option><option value="20">매월 20일</option><option value="21">매월 21일</option><option value="22">매월 22일</option><option value="23">매월 23일</option><option value="24">매월 24일</option><option value="25">매월 25일</option><option value="26">매월 26일</option><option value="27">매월 27일</option><option value="28">매월 28일</option><option value="29">매월 29일</option><option value="30">매월 30일</option><option value="31">매월 31일</option></select></label><label class="field">1주당 월 예상 배당액 · 세전<input id="holdingDividendAmount" type="number" min="0" step="any" value="0" placeholder="0 = 배당 없음"></label></div><div class="muted">배당액은 종목 통화(KRW/USD) 기준입니다. 0은 배당 없음, 빈칸은 미입력입니다. 월 예상 합계 = 주당 예상액 × 보유 수량. 해당 월에 입력한 날짜가 없으면 말일로 표시합니다.</div><label class="field" style="margin-top:15px">메모<input id="holdingMemo" maxlength="300" placeholder="선택 입력"></label><p class="tools-note" id="portfolioAutoSaveStatus" role="status" aria-live="polite">자동 저장 연결을 확인하는 중…</p><div class="toolbar"><button type="button" id="retryPortfolioSave">JSON 저장 재시도</button><button type="button" id="loadDiskPortfolio" hidden>파일 데이터 불러오기</button><button type="button" id="replaceDiskPortfolio" hidden>현재 입력으로 파일 저장</button></div><div class="form-end"><button class="primary" id="holdingSubmit" type="submit">보유 종목 추가</button></div><div class="muted">미국 종목은 티커·통화·현재가를 직접 입력하세요. 국내 ETF는 자동 시세를 이용합니다. 자산 유형과 투자대상을 확인해 지정하세요. 채권형 자산은 구성 비중에서 배당으로 집계합니다. 국내 상장 미국 ETF도 자산 유형과 미국 자산 분류를 각각 지정할 수 있습니다.</div></form></section></div></section>
+
+<section class="view" id="view-dividends" hidden>
+ <div class="titlebar"><div><h1>배당주 관리</h1><div class="muted">현재 보유한 배당·분배금 종목의 월별 예상 입금 일정을 확인하세요.</div></div><div class="toolbar"><label class="field">조회 월<input type="month" id="dividendMonth" aria-label="예상 배당 조회 월"></label><label class="field">계좌<select id="dividendAccountFilter" aria-label="배당 조회 계좌"><option value="">전체 계좌</option></select></label></div></div>
+ <div class="metrics dividend-overview">
+  <section class="metric dividend-total-card" aria-labelledby="dividendTotalTitle"><h2 class="overview-title" id="dividendTotalTitle">월 예상 배당액 · 원화 환산</h2><strong id="dividendMonthlyTotal">미입력</strong><small id="dividendNativeTotal"></small><p class="overview-hint">조회 월 · 일정과 금액 입력분의 세전 예상액</p></section>
+  <section class="metric dividend-matrix-card" aria-labelledby="dividendMatrixTitle"><h2 class="overview-title" id="dividendMatrixTitle">계좌별 예상 배당 일정</h2><small id="dividendMatrixMonth"></small><div class="dividend-matrix-scroll" tabindex="0" role="region" aria-label="계좌별 예상 지급일 표, 가로 스크롤 가능"><table class="dividend-matrix" aria-label="계좌별 날짜별 월 예상 배당액"><thead id="dividendMatrixHead"></thead><tbody id="dividendMatrixRows"></tbody><tfoot id="dividendMatrixTotals"></tfoot></table></div><p class="overview-hint">세로: 계좌 · 가로: 조회 월의 예상 지급일<br>미입력은 합계에서 제외 · —는 해당 날짜 예정 배당 없음</p></section>
+  <section class="metric dividend-status-card" aria-labelledby="dividendStatusTitle"><h2 class="overview-title" id="dividendStatusTitle">배당 현황</h2><dl class="overview-counts"><div><dt>배당 종목 · 보유행</dt><dd><b id="dividendHoldingCount">0</b>행</dd></div><div><dt>예정 지급일</dt><dd><b id="dividendScheduleCount">0</b>일</dd></div><div><dt>일정·금액 미입력</dt><dd><b id="dividendPendingCount">0</b>건</dd></div></dl><p class="overview-hint">복수 계좌 보유는 각각 집계합니다.</p></section>
+ </div>
+ <section class="panel"><div class="panel-head"><h2>일정별 예상 배당액</h2><span class="pill">MONTHLY PLAN</span></div><div class="panel-body muted" id="dividendSummaryNote"></div><div class="table-scroll dividend-schedule-scroll"><table><thead><tr><th>예상 지급일</th><th class="num">보유행 수</th><th class="num">원화 예상액</th><th class="num">달러 예상액</th><th class="num">원화 환산 합계</th></tr></thead><tbody id="dividendScheduleRows"></tbody><tfoot id="dividendScheduleTotals"></tfoot></table></div></section>
+ <section class="panel"><div class="panel-head"><h2>현재 보유 배당 종목 · 계좌별</h2><span class="muted">계좌별 월 합계는 일정·금액 입력분 기준 · 세전</span></div><div class="table-scroll"><table class="dividend-holdings-table"><thead><tr><th>종목</th><th class="num">보유 수량</th><th>월 예상 일정</th><th class="num">주당 월 예상액</th><th class="num">월 예상액 · 종목 통화</th><th class="num">원화 환산</th><th>수정</th></tr></thead><tbody id="dividendHoldingRows"></tbody></table></div></section>
+ <div class="notice">예상 배당액은 사용자가 입력한 1주당 월 세전 금액 × 현재 보유 수량입니다. 예상액이 0이면 배당 없음으로 목록과 합계에서 제외하며, 기존 배당 분류 종목의 미입력은 확인 필요로 표시합니다. 해당 월에 29~31일이 없으면 말일로 표시합니다. 휴일·실제 지급일 변경·세금은 자동 반영하지 않습니다. 계좌 내 예상 입금액이며 연금계좌에서 생활비로 인출 가능한 금액과는 다릅니다.</div>
+<section class="panel" id="actualDividendPanel"><div class="panel-head"><h2>실제 배당 수령 기록</h2><span class="pill">RECEIVED</span></div>
+<form class="panel-body" id="receiptForm"><div class="form-grid">
+<label class="field">수령 계좌<select id="receiptAccount" required></select></label>
+<label class="field">보유 종목에서 선택<select id="receiptHolding"><option value="">종목 선택 또는 직접 입력</option></select></label>
+<label class="field">실제 수령일<input id="receiptDate" type="date" required></label>
+<label class="field">종목코드 / 티커<input id="receiptCode" maxlength="24" required placeholder="매도한 종목도 직접 입력 가능"></label>
+<label class="field">종목명<input id="receiptName" maxlength="100" required></label>
+<label class="field">입금 통화<select id="receiptCurrency"><option value="KRW">KRW · 원</option><option value="USD">USD · 달러</option></select></label>
+<label class="field">실제 입금액 · 세후<input id="receiptAmount" type="number" min="0" max="1000000000000000" step="any" required placeholder="증권사 실제 입금액"></label>
+<label class="field" id="receiptFxField" hidden>해당 건의 환산 환율 · USD/KRW<input id="receiptFx" type="number" min="0.000001" max="10000000" step="any" disabled placeholder="선택 · 나중에 수정 가능"></label>
+<label class="field wide">메모<input id="receiptMemo" maxlength="300" placeholder="입금 명세 등 선택 입력"></label>
+</div><p class="tools-note">현재 보유 수량이나 예상 배당액과 별도로 실제 입금액을 기록합니다. 수령 기록은 계좌 현금 잔고에 자동 합산하지 않습니다. 달러 환산 환율은 건별로 저장하며 왼쪽 현재 환율을 바꿔도 과거 월 합계는 바뀌지 않습니다. 명시적인 0원 기록은 수령액 0원 확인에 사용할 수 있습니다.</p>
+<p class="tools-note" id="receiptSaveStatus" role="status" aria-live="polite">저장 연결을 확인하는 중…</p><div class="form-end"><button type="button" id="receiptRetrySave">파일 저장 재시도</button><button type="button" id="receiptExportJSON">전체 JSON 내보내기</button><button type="button" id="cancelReceiptEdit" hidden>수정 취소</button><button class="primary" type="submit" id="receiptSubmit">수령 내역 저장</button></div></form>
+<div class="panel-head"><h3>월별 수령 내역</h3><div class="toolbar"><label class="field">조회 월<input id="receiptListMonth" type="month"></label><label class="field">계좌<select id="receiptListAccount"><option value="">전체 계좌</option></select></label></div></div>
+<div class="panel-body muted" id="receiptListSummary"></div><div class="table-scroll"><table class="receipt-table"><thead><tr><th>수령일</th><th>계좌</th><th>종목</th><th class="num">실제 입금액</th><th class="num">기록 환율</th><th class="num">원화 환산</th><th>메모</th><th>수정</th></tr></thead><tbody id="receiptRows"></tbody></table></div></section>
+
+</section>
+
+<section class="view" id="view-files" hidden><div class="titlebar"><div><h1>기록·파일</h1><div class="muted">개인 입력은 JSON 파일로 보관하고 다음 실행 때 다시 불러옵니다.</div></div></div><div class="file-grid"><section class="panel"><div class="panel-head"><h2>데이터 저장·복원</h2></div><div class="panel-body"><div class="toolbar"><button class="primary" id="exportFile">전체 JSON 내보내기</button><button id="importFile">JSON 불러오기</button><button id="exportCSV">보유 현황 CSV</button></div><div class="notice">로컬 서버가 main/portfolio.json, daily/일별 기록, dividends/배당 기록을 지정한 OneDrive 폴더에 함께 저장합니다. 전체 JSON·CSV 내보내기도 해당 하위 폴더로 저장합니다.</div><p class="tools-note" id="fileState"></p></div></section><section class="panel"><div class="panel-head"><h2>시세 연결 범위</h2></div><div class="panel-body tools-note">KOSPI · KOSDAQ · 국내 ETF 종목 마스터와 기존 일별 CSV를 읽습니다. 미국 종목은 티커·현재가를 직접 입력할 수 있습니다. 미국 자동 시세·세금 가이드는 후속 범위입니다. ETF의 자산 유형·투자대상·성장/배당 분류는 직접 지정합니다.<br><br>현재 수량으로 과거 가격을 곱한 값을 실제 과거 자산으로 만들지 않습니다. 아래 차트는 직접 저장한 평가 기록만 사용합니다.</div></section></div>
+
+<section class="panel"><div class="panel-head"><h2>개인 데이터 저장 폴더</h2><button type="button" id="openPersonalServer">OneDrive 저장 화면 열기</button></div><div class="panel-body tools-note" id="personalStorageFolders"></div></section>
+<section class="panel" id="receiptHistoryPanel"><div class="panel-head"><div><h2>실제 배당 수령 · 월별 변화</h2><div class="muted">예상 배당과 별도로 기록한 실제 입금액</div></div><div class="toolbar"><label class="field">계좌<select id="receiptHistoryAccount"><option value="">전체 계좌</option></select></label><label class="field">연도<input id="receiptHistoryYear" type="number" min="1900" max="9999" step="1" placeholder="전체 연도"></label></div></div>
+<div class="panel-body"><div class="toolbar"><button type="button" id="exportReceiptCSV">전체 수령 내역 CSV 저장</button><button type="button" id="exportReceiptMonthlyCSV">전체 월별 합계 CSV 저장</button></div><p class="tools-note" id="receiptMonthlyNote"></p><p class="tools-note" id="receiptHistorySaveStatus" role="status" aria-live="polite"></p><div class="notice">실제 수령 원장과 월별 집계는 지정한 배당 폴더에도 별도로 자동 저장됩니다. 원본 포트폴리오는 메인 폴더에 보관합니다. 기록이 없는 월은 미기록이며, 전월 대비는 투자 수익률이 아닌 배당 입금액의 변화입니다.</div></div>
+<div class="table-scroll"><table class="receipt-monthly-table"><thead><tr><th>수령 월</th><th class="num">기록 건수</th><th class="num">원화 입금액</th><th class="num">달러 입금액</th><th class="num">총 입금액 · 원화 환산</th><th class="num">전월 대비 증가액</th><th class="num">전월 대비 증가율</th></tr></thead><tbody id="receiptMonthlyRows"></tbody></table></div></section>
+
+<section class="panel"><div class="panel-head"><h2>전체 자산 평가 기록</h2><select id="snapshotFrequency" aria-label="평가 기록 차트 주기"><option value="D">일별</option><option value="W">주별</option><option value="M">월별</option></select></div><div class="panel-body"><div class="chart-shell"><canvas id="snapshotChart" role="img" aria-label="저장한 자산 평가 기록"></canvas><div class="chart-tip" id="snapshotTip"></div></div><div class="notice">차트는 자산 규모의 변화입니다. 입출금이 포함되므로 투자 수익률로 해석하지 않습니다. 주·월 값은 해당 기간 마지막 저장 기록입니다.</div></div><div class="table-scroll"><table><thead><tr><th>기록일</th><th class="num">계산 가능한 평가액</th><th>계산 상태</th><th>가격 범위</th><th>기록시각</th></tr></thead><tbody id="snapshotRows"></tbody></table></div></section>
+
+</section>
+
+<footer>KRX_FDR · 로컬 CSV 기반 조회 도구. 데이터의 가격일·수집시각·수정 여부를 확인하세요. 개인 입력은 외부로 전송하지 않습니다.</footer>
+
+</main></div>
+
+<dialog id="serverLauncherDialog" aria-labelledby="serverLauncherTitle"><div class="panel-head"><h2 id="serverLauncherTitle">업데이트 서버 실행</h2><button id="closeServerLauncher" aria-label="실행 안내 닫기">닫기</button></div><div class="panel-body"><p>브라우저의 HTML은 Python을 직접 실행할 수 없습니다. 아래 실행 파일을 받아 열면 명령어 입력 없이 서버와 시장·종목 화면이 시작됩니다.</p><p><a id="downloadServerLauncher" class="launcher-link" href="portfolio_dashboard_start.cmd" download="portfolio_dashboard_start.cmd">실행 파일 받기 (.cmd)</a></p><p class="muted">다운로드한 <b>portfolio_dashboard_start.cmd</b>를 한 번 열어주세요. 이미 실행 중인 이 프로젝트의 서버가 있으면 재사용합니다. 처음 실행할 때는 파일을 직접 열어야 합니다.</p><p class="notice">HTML 직접 열기와 서버 주소·포트가 달라지면 저장공간도 달라집니다. 기존 입력이 있다면 현재 화면에서 JSON 저장 후 새 서버 화면에서 불러오세요.</p><p><a href="http://127.0.0.1:8765/portfolio_dashboard.html?view=market">기본 포트의 서버 화면 열기</a></p><details><summary>실행 파일 대신 명령어 사용</summary><code>python portfolio_dashboard.py --serve</code></details></div></dialog>
+
+<input id="jsonInput" class="hidden-input" type="file" accept=".json,application/json"><datalist id="tickerOptions"></datalist><div id="toast" class="toast" role="status" hidden></div>
+
+<script>
+
+'use strict';
+
+const MARKET=/*__KRX_DATA__*/null;
+
+const $=id=>document.getElementById(id), fmt=(x,d=0)=>x===null||x===undefined?'—':Number(x).toLocaleString('ko-KR',{maximumFractionDigits:d});
+
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const krDate=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
+
+const uid=()=>globalThis.crypto?.randomUUID?.()||'id-'+Date.now().toString(36)+Math.random().toString(36).slice(2);
+
+const validNumber=(v,min=0)=>typeof v==='number'&&Number.isFinite(v)&&v>=min;
+
+const symbols=new Map((MARKET?.symbols||[]).map(x=>[x.code,x]));
+
+let activeView='portfolio',selectedCode=symbols.has('005930')?'005930':symbols.keys().next().value,range='1Y',page=0,currentHistory=null,loadToken=0,dirty=false,exportedAt=null,toastTimer,online=false;
+
+const PERSONAL_STORAGE_CONFIG=/*__PERSONAL_STORAGE_CONFIG__*/null;
+if(location.protocol==='file:'&&PERSONAL_STORAGE_CONFIG?.server_url){
+ const probe=new Image();probe.onload=()=>location.replace(PERSONAL_STORAGE_CONFIG.server_url+'/portfolio_dashboard.html'+location.search);probe.onerror=()=>{};probe.src=PERSONAL_STORAGE_CONFIG.server_url+'/api/storage-ping';
+}
+let portfolio;
+
+function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500)}
+
+function persist(reason){portfolio.revision++;portfolio.audit.push({at:new Date().toISOString(),action:reason});dirty=true;try{localStorage.setItem('krx-portfolio-v1',JSON.stringify(portfolio))}catch(e){toast('임시 저장을 사용할 수 없습니다. JSON으로 내보내세요.')}renderPortfolio();renderSaveState();if(typeof queuePortfolioSave==='function')queuePortfolioSave(reason)}
+
+for(const btn of document.querySelectorAll('.nav'))btn.addEventListener('click',()=>switchView(btn.dataset.view));
+
+function colorClass(value){return value>0?'up':value<0?'down':'flat'}
+
+function percent(value){return value===null||value===undefined?'—':(value>0?'+':'')+fmt(value,2)+'%'}
+
+function renderMarket(){
+
+ const query=$('search').value.trim().toLowerCase(),market=$('marketFilter').value,sort=$('sort').value;
+
+ let rows=[...symbols.values()].filter(s=>(market==='ALL'||s.market===market)&&(s.code.toLowerCase().includes(query)||s.name.toLowerCase().includes(query)));
+
+ rows.sort((a,b)=>{if(sort==='name')return a.name.localeCompare(b.name,'ko');if(sort.startsWith('change')){if(a.change_pct==null)return b.change_pct==null?0:1;if(b.change_pct==null)return -1;return sort==='change_desc'?b.change_pct-a.change_pct:a.change_pct-b.change_pct}return a.code.localeCompare(b.code)});
+
+ const pages=Math.max(1,Math.ceil(rows.length/40));page=Math.min(page,pages-1);$('searchCount').textContent=fmt(rows.length)+'개 종목';
+
+ $('marketRows').innerHTML=rows.slice(page*40,page*40+40).map(s=>`<tr class="stock-row ${s.code===selectedCode?'selected':''}" data-code="${esc(s.code)}" tabindex="0"><td class="name-cell"><b>${esc(s.name)}</b><small>${esc(s.code)}</small></td><td><span class="badge">${esc(s.market)}</span></td><td class="num">${fmt(s.price)}</td><td class="num ${colorClass(s.change_pct)}">${percent(s.change_pct)}</td><td class="data-date">${esc(s.date||'자료 없음')}</td><td class="actions-cell"><button data-add="${esc(s.code)}">추가</button></td></tr>`).join('')||'<tr><td colspan="6" class="empty">일치하는 종목이 없습니다.</td></tr>';
+
+ $('paginationLabel').textContent=(page+1)+' / '+pages+' 페이지';$('prevPage').disabled=page===0;$('nextPage').disabled=page>=pages-1;
+
+}
+
+for(const id of ['search','marketFilter','sort'])$(id).addEventListener(id==='search'?'input':'change',()=>{page=0;renderMarket()});
+
+$('prevPage').onclick=()=>{page--;renderMarket()};$('nextPage').onclick=()=>{page++;renderMarket()};
+
+$('marketRows').onclick=e=>{const add=e.target.closest('[data-add]');if(add){$('holdingCode').value=add.dataset.add;switchView('portfolio');return}const row=e.target.closest('[data-code]');if(row)selectStock(row.dataset.code)};
+
+$('marketRows').onkeydown=e=>{if(e.key==='Enter'&&e.target.matches('[data-code]'))selectStock(e.target.dataset.code)};
+
+async function loadHistory(code,force=false){
+
+ window.KRX_HISTORY=window.KRX_HISTORY||{};if(force)delete window.KRX_HISTORY[code];if(window.KRX_HISTORY[code])return window.KRX_HISTORY[code];
+
+ return new Promise((resolve,reject)=>{const script=document.createElement('script');const timer=setTimeout(()=>done(Error('가격 파일을 불러오는 시간이 초과되었습니다.')),12000);function done(error){clearTimeout(timer);script.remove();if(error)reject(error);else if(window.KRX_HISTORY[code])resolve(window.KRX_HISTORY[code]);else reject(Error('가격 파일 형식이 올바르지 않습니다.'))}script.onload=()=>done();script.onerror=()=>done(Error('가격 이력이 없습니다. HTML과 portfolio_dashboard_data 폴더를 함께 보관하세요.'));script.src='portfolio_dashboard_data/history/'+encodeURIComponent(code)+'.js'+(force?'?v='+Date.now():'');document.head.appendChild(script)});
+
+}
+
+async function selectStock(code,force=false){
+
+ selectedCode=code;const token=++loadToken,s=symbols.get(code);currentHistory=null;renderMarket();
+
+ $('selectedName').textContent=s.name;$('selectedMarket').textContent=s.market_detail;$('selectedCode').textContent=s.code+' · KRW';$('selectedPrice').textContent=fmt(s.price)+(s.price!=null?' 원':'');
+
+ $('selectedChange').textContent=percent(s.change_pct)+' · 직전 기록 '+(s.comparison_date||'—')+' 대비';$('selectedChange').className='data-date '+colorClass(s.change_pct);
+
+ const meta=s.meta||{};const facts=[['가격 기준일',s.date||'자료 없음'],['수집시각',meta.source_asof||'미확인'],['원본 상태 표기',meta.source_status||'미확인'],['거래량',fmt(s.volume)],['조회 시작일',meta.first_date||'—'],['가격 기록 수',fmt(meta.rows)],['통화','KRW']];
+
+ $('stockFacts').innerHTML=facts.map(([k,v])=>`<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+
+ $('historyStatus').textContent='과거 가격을 불러오는 중…';$('chartPeriod').textContent='';
+
+ const age=s.date?Math.floor((Date.parse(krDate())-Date.parse(s.date))/86400000):null;$('staleNotice').hidden=age!==null&&age<5;$('staleNotice').textContent=age===null?'가격 자료가 없습니다.':`마지막 가격일이 오늘보다 ${age}일 이전입니다. 휴장·거래정지·수집 누락 여부를 확인하세요.`;
+
+ renderPriceChart();try{const loaded=await loadHistory(code,force);if(token!==loadToken)return;currentHistory=loaded;$('historyStatus').textContent=loaded.meta.price_basis+' · '+loaded.meta.source;renderPriceChart()}catch(e){if(token===loadToken){$('historyStatus').textContent=e.message;renderPriceChart()}}
+
+}
+
+function aggregate(points,frequency){if(frequency==='D')return points;const groups=new Map();for(const point of points){let key=point[0].slice(0,7);if(frequency==='W'){const day=new Date(point[0]+'T00:00:00Z');day.setUTCDate(day.getUTCDate()-((day.getUTCDay()+6)%7));key=day.toISOString().slice(0,10)}groups.set(key,point)}return [...groups.values()]}
+
+function rangePoints(points){if(range==='ALL'||!points.length)return points;const last=new Date(points.at(-1)[0]+'T00:00:00Z');const months={"1M":1,"3M":3,"1Y":12,"3Y":36}[range];last.setUTCMonth(last.getUTCMonth()-months);const cutoff=last.toISOString().slice(0,10);return points.filter(p=>p[0]>=cutoff)}
+
+function drawChart(canvasId,tipId,points,emptyText){
+
+ const canvas=$(canvasId),rect=canvas.getBoundingClientRect();if(!rect.width)return;const dpr=window.devicePixelRatio||1;canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);const w=rect.width,h=rect.height,L=64,R=15,T=19,B=30;ctx.clearRect(0,0,w,h);ctx.font='11px Segoe UI, Malgun Gothic';ctx.fillStyle='#8a99ac';
+
+ if(!points.length){ctx.textAlign='center';ctx.fillText(emptyText,w/2,h/2);canvas.onmousemove=null;$(tipId).style.display='none';return}
+
+ let min=Math.min(...points.map(p=>p[1])),max=Math.max(...points.map(p=>p[1]));let pad=(max-min)*.15||Math.max(1,max*.02);min-=pad;max+=pad;
+
+ const times=points.map(p=>Date.parse(p[0])),from=times[0],to=times.at(-1),x=i=>to===from?(L+w-R)/2:L+(times[i]-from)/(to-from)*(w-L-R),y=value=>T+(max-value)/(max-min)*(h-T-B);
+
+ ctx.strokeStyle='#edf1f6';ctx.lineWidth=1;ctx.textAlign='right';for(let i=0;i<5;i++){const value=min+(max-min)*i/4,yy=y(value);ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(w-R,yy);ctx.stroke();ctx.fillText(fmt(value),L-10,yy+4)}
+
+ const gradient=ctx.createLinearGradient(0,T,0,h-B);gradient.addColorStop(0,'#3478ed24');gradient.addColorStop(1,'#3478ed00');ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(x(i),y(p[1])):ctx.moveTo(x(i),y(p[1])));ctx.lineTo(x(points.length-1),h-B);ctx.lineTo(x(0),h-B);ctx.closePath();ctx.fillStyle=gradient;ctx.fill();ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(x(i),y(p[1])):ctx.moveTo(x(i),y(p[1])));ctx.strokeStyle='#2b72e7';ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.arc(x(points.length-1),y(points.at(-1)[1]),3,0,2*Math.PI);ctx.fillStyle='#2b72e7';ctx.fill();ctx.fillStyle='#8a99ac';ctx.textAlign='left';ctx.fillText(points[0][0],L,h-7);ctx.textAlign='right';ctx.fillText(points.at(-1)[0],w-R,h-7);
+
+ canvas.onmousemove=e=>{const box=canvas.getBoundingClientRect(),mx=e.clientX-box.left;let nearest=0;for(let i=1;i<points.length;i++)if(Math.abs(x(i)-mx)<Math.abs(x(nearest)-mx))nearest=i;const tip=$(tipId);tip.textContent=points[nearest][0]+' · '+fmt(points[nearest][1])+' 원';tip.style.left=Math.max(0,Math.min(w-200,x(nearest)-60))+'px';tip.style.top=Math.max(0,y(points[nearest][1])-40)+'px';tip.style.display='block'};canvas.onmouseleave=()=>$(tipId).style.display='none';
+
+}
+
+function renderPriceChart(){const points=currentHistory?aggregate(rangePoints(currentHistory.points),$('frequency').value):[];drawChart('priceChart','priceTip',points,currentHistory?'선택 기간의 가격이 없습니다.':'가격 이력을 불러오거나 종목을 선택하세요.');if(points.length)$('chartPeriod').textContent=points[0][0]+' — '+points.at(-1)[0]+' · '+fmt(points.length)+'개 기록 · 마지막 자료 기준 기간'}
+
+$('rangeTabs').onclick=e=>{const btn=e.target.closest('[data-range]');if(!btn)return;range=btn.dataset.range;for(const b of $('rangeTabs').querySelectorAll('button'))b.classList.toggle('active',b===btn);renderPriceChart()};$('frequency').onchange=renderPriceChart;
+
+function download(content,name,type){if(/^(krx_holdings_|dividend_receipts_|dividend_monthly_)/.test(name)){savePersonalExport(content,name).then(saved=>toast('파일 저장 완료 · '+saved.path)).catch(error=>toast(error.message));return}const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000)}
+
+async function exportJSON(){try{const text=JSON.stringify({...receiptExportDocument(portfolio),exported_at:new Date().toISOString()},null,2);const saved=await savePersonalExport(text,'krx_portfolio_'+krDate()+'_r'+portfolio.revision+'.json');dirty=false;exportedAt=new Date().toLocaleTimeString('ko-KR');renderSaveState();toast('JSON 파일 저장 완료 · '+saved.path)}catch(error){toast(error.message)}}
+
+for(const id of ['exportTop','exportFile'])$(id).onclick=exportJSON;for(const id of ['importTop','importFile'])$(id).onclick=()=>$('jsonInput').click();
+
+$('jsonInput').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>50*1024*1024)throw Error('JSON 파일이 너무 큽니다.');const next=validatePortfolio(JSON.parse(await file.text()));if((portfolio.holdings.length||(portfolio.dividend_receipts||[]).length||portfolio.accounts.some(a=>a.cash!==null))&&!confirm('현재 개인 입력을 이 JSON으로 바꿀까요? 필요한 입력은 먼저 내보내세요.'))return;portfolio=next;resetDividendReceiptForm();dirty=false;exportedAt=null;try{localStorage.setItem('krx-portfolio-v1',JSON.stringify(portfolio))}catch{}renderPortfolio();renderSaveState();toast('JSON을 복원했습니다.');if(typeof queuePortfolioSave==='function')queuePortfolioSave('JSON 불러오기')}catch(error){toast('가져오기 실패: '+error.message)}finally{e.target.value=''}};
+
+function csvCell(value){let text=String(value??'');if(/^[=+@\-\t\r]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"'}
+
+$('refreshPrice').onclick=async()=>{if(!online)return;const code=selectedCode,button=$('refreshPrice');button.disabled=true;button.textContent='조회 중 · 최대 50초';try{const response=await fetch('/api/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),signal:AbortSignal.timeout(58000)}),data=await response.json();if(!response.ok)throw Error(data.error||'조회 실패');symbols.set(code,data.symbol);renderPortfolio();if(selectedCode===code)await selectStock(code,true);else delete window.KRX_HISTORY?.[code];toast('선택 종목의 조회를 마쳤습니다. 가격 기준일을 확인하세요.')}catch(e){toast(e.message+' 기존 시세는 유지합니다.')}finally{button.disabled=false;button.textContent='선택 종목 온라인 갱신'}};
+
+async function checkServer(){if(!['127.0.0.1','localhost'].includes(location.hostname))return;try{const res=await fetch('/api/status'),data=await res.json();online=!!data.online_refresh;$('refreshPrice').disabled=!online;if(online)$('connection').textContent='로컬 서버 연결 · 온라인 조회 가능'}catch{}}
+
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(activeView==='market')renderPriceChart();else if(activeView==='files')renderSnapshots()},100)});
+
+function init(){if(!MARKET){toast('시장 데이터가 없습니다. Python 생성기를 실행하세요.');return}$('kospiCount').textContent=fmt(MARKET.counts.KOSPI||0);$('kosdaqCount').textContent=fmt(MARKET.counts.KOSDAQ||0);$('etfCount').textContent=fmt(MARKET.counts.ETF||0);$('cachedCount').textContent=fmt(MARKET.cached_count);const dates=MARKET.symbols.map(s=>s.date).filter(Boolean).sort();$('latestDate').textContent=dates.at(-1)||'자료 없음';$('dateCoverage').textContent=dates.length?dates[0]+' ~ '+dates.at(-1):'가격 없음';$('sideGenerated').textContent='생성 '+MARKET.generated_at.slice(0,16).replace('T',' ');$('tickerOptions').innerHTML=MARKET.symbols.map(s=>`<option value="${esc(s.code)}">${esc(s.name)}</option>`).join('');renderMarket();renderPortfolio();renderSaveState();if(selectedCode)selectStock(selectedCode);checkServer()}
+
+</script>
+
+<script src="portfolio_accounts.js?v=20261028-onedrive-storage"></script>
+
+<script>
+
+/*__PORTFOLIO_STORAGE__*/
+
+</script>
+
+<script>
+
+// The page never executes a shell command. The fixed-purpose CMD starts Python.
+
+const DASHBOARD_LAUNCHER=/*__KRX_LAUNCHER__*/null;
+
+let marketUpdateRunning=false,marketPollingTimer=null;
+
+const updateButton=$('marketUpdate'),updateStatus=$('marketUpdateStatus');
+
+function updateMessage(text){updateStatus.textContent=text}
+
+function finishMarketUpdate(){marketUpdateRunning=false;updateButton.disabled=false;updateButton.textContent='종목 업데이트 / 서버 실행'}
+
+function applyUpdatedMarket(data){
+
+ if(!data||!Array.isArray(data.symbols))throw Error('종목 데이터 형식이 올바르지 않습니다.');
+
+ Object.assign(MARKET,data);symbols.clear();for(const s of data.symbols)symbols.set(s.code,s);
+
+ window.KRX_HISTORY={};$('kospiCount').textContent=fmt(data.counts.KOSPI||0);$('kosdaqCount').textContent=fmt(data.counts.KOSDAQ||0);$('etfCount').textContent=fmt(data.counts.ETF||0);$('cachedCount').textContent=fmt(data.cached_count);
+
+ const dates=data.symbols.map(s=>s.date).filter(Boolean).sort();$('latestDate').textContent=dates.at(-1)||'자료 없음';$('dateCoverage').textContent=dates.length?dates[0]+' ~ '+dates.at(-1):'가격 없음';$('sideGenerated').textContent='생성 '+data.generated_at.slice(0,16).replace('T',' ');
+
+ $('tickerOptions').innerHTML=data.symbols.map(s=>`<option value="${esc(s.code)}">${esc(s.name)}</option>`).join('');
+
+ renderMarket();renderPortfolio();if(!symbols.has(selectedCode))selectedCode=symbols.keys().next().value;if(selectedCode)selectStock(selectedCode,true);
+
+}
+
+async function pollMarketUpdate(){
+
+ try{
+
+  const response=await fetch('/api/update-status',{signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error('업데이트 상태를 확인하지 못했습니다.');const job=await response.json();
+
+  if(job.state==='running'){
+
+   marketUpdateRunning=true;updateButton.disabled=true;updateButton.textContent='종목 업데이트 중…';updateMessage(job.total?'기존 CSV를 반영하는 중 · '+fmt(job.done)+' / '+fmt(job.total)+'개':'종목 마스터를 확인하는 중…');
+
+   marketPollingTimer=setTimeout(pollMarketUpdate,1000);return;
+
+  }
+
+  if(job.state==='complete'){
+
+   const result=await fetch('/api/market',{signal:AbortSignal.timeout(10000)});if(!result.ok)throw Error('갱신한 종목을 불러오지 못했습니다.');applyUpdatedMarket(await result.json());
+
+   updateMessage('업데이트 완료 · '+fmt(job.summary.symbols)+'개 종목 · 가격 연결 '+fmt(job.summary.cached)+'개 · 미확인 '+fmt(job.summary.issues)+'건');
+
+  }else if(job.state==='error')updateMessage('업데이트 실패: '+job.error+' 기존 개인 입력은 유지됩니다.');
+
+  else updateMessage('서버에 연결되어 있습니다. 버튼을 누르면 기존 CSV의 목록·시세를 다시 반영합니다.');
+
+  finishMarketUpdate();
+
+ }catch(error){finishMarketUpdate();updateMessage('연결 확인 필요: '+error.message)}
+
+}
+
+async function requestMarketUpdate(){
+
+ if(marketUpdateRunning)return;
+
+ if(!['127.0.0.1','localhost'].includes(location.hostname)){$('serverLauncherDialog').showModal();return}
+
+ try{
+
+  const status=await fetch('/api/status',{signal:AbortSignal.timeout(3000)});const info=await status.json();
+
+  if(!info.market_update){$('serverLauncherDialog').showModal();return}
+
+  marketUpdateRunning=true;updateButton.disabled=true;updateButton.textContent='종목 업데이트 중…';updateMessage('업데이트를 요청했습니다.');
+
+  const response=await fetch('/api/update-market',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(5000)});
+
+  if(!response.ok&&response.status!==409){const result=await response.json();throw Error(result.error||'업데이트 요청 실패')}
+
+  await pollMarketUpdate();
+
+ }catch(error){finishMarketUpdate();updateMessage('서버 연결 필요: '+error.message);$('serverLauncherDialog').showModal()}
+
+}
+
+updateButton.onclick=requestMarketUpdate;
+
+$('closeServerLauncher').onclick=()=>$('serverLauncherDialog').close();
+
+$('downloadServerLauncher').onclick=e=>{e.preventDefault();if(!DASHBOARD_LAUNCHER)return toast('프로젝트 폴더의 portfolio_dashboard_start.cmd를 열어주세요.');download(DASHBOARD_LAUNCHER,'portfolio_dashboard_start.cmd','application/octet-stream')};
+
+const launchQuery=new URLSearchParams(location.search);
+
+if(launchQuery.get('view')==='market')switchView('market');
+
+if(launchQuery.get('update')==='1'&&['127.0.0.1','localhost'].includes(location.hostname))pollMarketUpdate();
+
+</script>
+
+</body></html>
+

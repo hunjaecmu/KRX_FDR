@@ -1,13 +1,18 @@
 # data_store.py
 
-KRX(KOSPI + KOSDAQ) 일봉 데이터를 수집하고, 파생 데이터(일/주/월봉 + 이동평균)를 생성하는 모듈 문서입니다.
+KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데이터(일/주/월봉 + 이동평균)를 생성하는 모듈 문서입니다.
 
 ## 1. 역할 요약
 
 `data_store.py`는 아래 작업을 담당합니다.
 
 - 종목 마스터 갱신 (`update_master`)
+  - FinanceDataReader의 `KOSPI`, `KOSDAQ`, `ETF/KR` 목록 병합
+  - ETF 목록에서 코드 컬럼으로 제공되는 `Symbol`도 표준 `code`로 변환
+  - ETF 행은 `market=ETF/KR`로 구분
 - 원시 일봉(raw) 수집/증분 업데이트 (`update_one_raw_stock`)
+  - 저장된 과거 장중 일봉이 2일 이상 연속되면 해당 날짜 범위를 한 번에 재조회해 종가로 보정
+  - 재조회 로그에는 여러 날짜의 개별 항목 대신 범위의 시작일과 종료일을 표시
 - 파생 데이터 생성
   - 일봉 (`build_daily_derived`)
   - 주봉 (`build_weekly_derived`)
@@ -88,8 +93,8 @@ KRX(KOSPI + KOSDAQ) 일봉 데이터를 수집하고, 파생 데이터(일/주/�
 `run_all(force_master_update=False, derive_all=True)`
 
 1. 디렉터리 생성 (`ensure_dirs`)
-2. 마스터 갱신 (`update_master`)
-3. 전체 종목 raw 업데이트 (`update_one_raw_stock`)
+2. 마스터 갱신 (`update_master`): KOSPI, KOSDAQ, 한국 ETF 종목 목록 병합
+3. 마스터에 포함된 모든 종목 raw 업데이트 (`update_one_raw_stock`)
 4. 전체(또는 업데이트 종목만) derived 생성 (`generate_derived_for_one_stock`)
 5. 로그 CSV 저장
 

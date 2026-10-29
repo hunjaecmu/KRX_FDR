@@ -5,6 +5,8 @@ import html
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from datetime import date, timedelta
 from random import randint
 from typing import Optional
@@ -69,10 +71,10 @@ def _render_live_log(live_placeholder, logs: list[str], max_lines: int = 24) -> 
     )
 
 
-def run_data_store_and_collect_logs() -> tuple[list[str], int]:
+def run_data_store_and_collect_logs(data_progress_box, markets: Optional[list[str]] = None) -> tuple[list[str], int]:
     project_root = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(project_root, "data_store.py")
-    command = [sys.executable, "-u", script_path]
+    command = [sys.executable, "-u", script_path, *(markets or [])]
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -89,49 +91,69 @@ def run_data_store_and_collect_logs() -> tuple[list[str], int]:
     )
 
     live = st.empty()
-    progress = st.progress(0.0, text="대기 중")
-    status = st.empty()
 
-    raw_total = None
-    derived_total = None
+    raw_done = 0
+    raw_total = 1
+    derived_done = 0
+    derived_total = 1
+
+    def _update_data_store_progress() -> None:
+        raw_part = min(max(raw_done / raw_total, 0.0), 1.0)
+        derived_part = min(max(derived_done / derived_total, 0.0), 1.0)
+        total_part = min(max((raw_part * 0.5) + (derived_part * 0.5), 0.0), 1.0)
+
+        st.session_state.data_store_progress_value = total_part
+        st.session_state.data_store_progress_text = (
+            f"전체 {total_part * 100:.2f}% "
+            f"(RAW {raw_part * 50:.2f}% + DERIVED {derived_part * 50:.2f}%) "
+            f"| RAW {raw_done}/{raw_total} | DERIVED {derived_done}/{derived_total}"
+        )
+        data_progress_box.progress(
+            float(st.session_state.data_store_progress_value),
+            text=st.session_state.data_store_progress_text,
+        )
     if process.stdout is not None:
+        last_render = 0.0
         while True:
             raw_line = process.stdout.readline()
             if not raw_line:
                 if process.poll() is not None:
                     break
+                time.sleep(0.05)
                 continue
 
             line_text = _decode_log_bytes(raw_line)
             _append_log_text(logs, line_text)
-            _render_live_log(live, logs)
+            now = time.monotonic()
+            if now - last_render >= 0.5:
+                _render_live_log(live, logs)
+                last_render = now
 
             current_line = logs[-1] if logs else ""
 
             raw_match = re.search(r"\[RAW\s+(\d+)/(\d+)\]", current_line)
             if raw_match:
-                raw_idx = int(raw_match.group(1))
-                raw_total = int(raw_match.group(2))
-                denom = (raw_total * 2) if raw_total > 0 else 1
-                progress_val = min(max(raw_idx / denom, 0.0), 1.0)
-                progress.progress(progress_val, text=f"RAW 단계: {raw_idx}/{raw_total}")
-                status.info(f"현재 진행: RAW {raw_idx}/{raw_total}")
+                raw_done = int(raw_match.group(1))
+                raw_total = int(raw_match.group(2)) if int(raw_match.group(2)) > 0 else 1
+                _update_data_store_progress()
 
             derived_match = re.search(r"\[DERIVED\s+(\d+)/(\d+)\]", current_line)
             if derived_match:
-                derived_idx = int(derived_match.group(1))
-                derived_total = int(derived_match.group(2))
-                total = derived_total if derived_total > 0 else 1
-                progress_val = min(max((total + derived_idx) / (total * 2), 0.0), 1.0)
-                progress.progress(progress_val, text=f"DERIVED 단계: {derived_idx}/{derived_total}")
-                status.info(f"현재 진행: DERIVED {derived_idx}/{derived_total}")
+                derived_done = int(derived_match.group(1))
+                derived_total = int(derived_match.group(2)) if int(derived_match.group(2)) > 0 else 1
+                _update_data_store_progress()
 
     return_code = process.wait()
     if return_code == 0:
-        progress.progress(1.0, text="완료")
-        status.success("데이터 업데이트가 완료되었습니다.")
+        st.session_state.data_store_progress_value = 1.0
+        st.session_state.data_store_progress_text = "전체 100.00% (RAW 50.00% + DERIVED 50.00%) | 완료"
+        data_progress_box.progress(1.0, text=st.session_state.data_store_progress_text)
     else:
-        status.error(f"데이터 업데이트 실패 (종료 코드: {return_code})")
+        st.session_state.data_store_progress_text = "데이터 업데이트 실패"
+        data_progress_box.progress(
+            float(st.session_state.data_store_progress_value),
+            text=st.session_state.data_store_progress_text,
+        )
 
     # 실행 완료 후 라이브 로그 placeholder를 비워, 하단 최종 로그 박스와 중복 렌더링되지 않게 한다.
     live.empty()
@@ -139,73 +161,108 @@ def run_data_store_and_collect_logs() -> tuple[list[str], int]:
     return logs, return_code
 
 
-def run_scan_market_and_collect_logs(scan_progress_box) -> tuple[list[str], int]:
+SCAN_LOG_TAIL_BYTES = 256 * 1024
+SCAN_LIVE_LOG_LINES = 24
+SCAN_REFRESH_SEC = 1
+
+
+@st.cache_resource
+def _scan_job_registry() -> dict:
+    # 서버 프로세스 전체에서 공유: 브라우저 새로고침/세션 변경에도 실행 중인 스캔을 유지한다.
+    return {"proc": None, "log_path": None, "log_handle": None}
+
+
+def is_scan_job_running() -> bool:
+    proc = _scan_job_registry()["proc"]
+    return proc is not None and proc.poll() is None
+
+
+def start_scan_job() -> None:
+    registry = _scan_job_registry()
+    if is_scan_job_running():
+        return
+
     project_root = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(project_root, "scripts", "scan_market.py")
-    command = [sys.executable, "-u", script_path]
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
-    logs: list[str] = []
-    process = subprocess.Popen(
-        command,
+    log_path = os.path.join(tempfile.gettempdir(), "krx_scan_market.log")
+    if registry["log_handle"] is not None:
+        registry["log_handle"].close()
+    log_handle = open(log_path, "wb")
+    registry["log_handle"] = log_handle
+    registry["log_path"] = log_path
+    registry["proc"] = subprocess.Popen(
+        [sys.executable, "-u", script_path],
         cwd=project_root,
-        stdout=subprocess.PIPE,
+        stdout=log_handle,
         stderr=subprocess.STDOUT,
-        text=False,
-        bufsize=0,
         env=env,
     )
 
-    live = st.empty()
-    scan_done = 0
-    scan_total = 1
-    chart_done = 0
-    chart_total = 1
 
-    if process.stdout is not None:
-        while True:
-            raw_line = process.stdout.readline()
-            if not raw_line:
-                if process.poll() is not None:
-                    break
-                continue
+def _read_log_tail_lines(log_path: Optional[str], max_bytes: int = SCAN_LOG_TAIL_BYTES) -> list[str]:
+    if not log_path or not os.path.isfile(log_path):
+        return []
+    with open(log_path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        fh.seek(max(size - max_bytes, 0))
+        data = fh.read()
+    lines: list[str] = []
+    _append_log_text(lines, _decode_log_bytes(data))
+    return lines
 
-            line_text = _decode_log_bytes(raw_line)
-            _append_log_text(logs, line_text)
-            _render_live_log(live, logs)
 
-            current_line = next((x for x in reversed(logs) if str(x).strip()), "")
+def _parse_scan_progress(lines: list[str]) -> tuple[float, str]:
+    scan_done, scan_total, chart_done, chart_total = 0, 1, 0, 1
+    for line in reversed(lines):
+        if scan_total == 1 and scan_done == 0:
+            m = re.search(r"\[SCAN\]\s*진행률:\s*(\d+)/(\d+)", line)
+            if m:
+                scan_done, scan_total = int(m.group(1)), max(int(m.group(2)), 1)
+        if chart_total == 1 and chart_done == 0:
+            m = re.search(r"\[CHART\]\s*생성중\s*(\d+)/(\d+)", line)
+            if m:
+                chart_done, chart_total = int(m.group(1)), max(int(m.group(2)), 1)
+        if (scan_done or scan_total > 1) and (chart_done or chart_total > 1):
+            break
+    scan_part = min(max(scan_done / scan_total, 0.0), 1.0)
+    chart_part = min(max(chart_done / chart_total, 0.0), 1.0)
+    value = min(max(scan_part * 0.5 + chart_part * 0.5, 0.0), 1.0)
+    return value, f"SCAN {scan_done}/{scan_total} | CHART {chart_done}/{chart_total}"
 
-            scan_match = re.search(r"\[SCAN\]\s*진행률:\s*(\d+)/(\d+)", current_line)
-            if scan_match:
-                scan_done = int(scan_match.group(1))
-                scan_total = int(scan_match.group(2)) if int(scan_match.group(2)) > 0 else 1
 
-            chart_match = re.search(r"\[CHART\]\s*생성중\s*(\d+)/(\d+)", current_line)
-            if chart_match:
-                chart_done = int(chart_match.group(1))
-                chart_total = int(chart_match.group(2)) if int(chart_match.group(2)) > 0 else 1
-
-            scan_part = min(max(scan_done / scan_total, 0.0), 1.0)
-            chart_part = min(max(chart_done / chart_total, 0.0), 1.0)
-            progress_val = min(max((scan_part * 0.5) + (chart_part * 0.5), 0.0), 1.0)
-            st.session_state.scan_progress_value = progress_val
-            st.session_state.scan_progress_text = f"SCAN {scan_done}/{scan_total} | CHART {chart_done}/{chart_total}"
-            scan_progress_box.progress(progress_val, text=st.session_state.scan_progress_text)
-
-    return_code = process.wait()
+def _finalize_scan_job() -> None:
+    registry = _scan_job_registry()
+    return_code = registry["proc"].poll()
+    lines = _read_log_tail_lines(registry["log_path"])
+    st.session_state.scan_market_logs = lines
+    st.session_state.scan_market_last_returncode = return_code
     if return_code == 0:
         st.session_state.scan_progress_value = 1.0
         st.session_state.scan_progress_text = "SCAN 완료 | CHART 완료"
-        scan_progress_box.progress(1.0, text=st.session_state.scan_progress_text)
     else:
         st.session_state.scan_progress_text = "스캔 실패"
-        scan_progress_box.progress(float(st.session_state.scan_progress_value), text=st.session_state.scan_progress_text)
+    st.session_state.scan_market_latest_dir = get_scan_status(OUTPUT_DIR).get("latest_scan_dir")
+    st.session_state.scan_market_running = False
+    st.rerun()
 
-    live.empty()
-    return logs, return_code
+
+def render_scan_job_status() -> None:
+    """파일 로그의 마지막 일부와 진행률만 읽어 표시한다. 스캔 자체는 별도 프로세스에서 실행된다."""
+    registry = _scan_job_registry()
+    lines = _read_log_tail_lines(registry["log_path"])
+    value, text = _parse_scan_progress(lines)
+    st.session_state.scan_progress_value = value
+    st.session_state.scan_progress_text = text
+    st.progress(value, text=text)
+    _render_live_log(st.empty(), lines, max_lines=SCAN_LIVE_LOG_LINES)
+
+    if not is_scan_job_running():
+        _finalize_scan_job()
 
 
 def build_mock_chart_data(days: int = 80) -> pd.DataFrame:
@@ -533,11 +590,11 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
         run_col1, run_col2, run_col3 = st.columns(3)
         with run_col1:
-            run_lookup = st.button("종목 차트 조회", type="primary", use_container_width=True, key=f"{prefix}_run_lookup")
+            run_lookup = st.button("종목 차트 조회", type="primary", width="stretch", key=f"{prefix}_run_lookup")
         with run_col2:
-            move_prev = st.button("이전 1봉", use_container_width=True, key=f"{prefix}_move_prev")
+            move_prev = st.button("이전 1봉", width="stretch", key=f"{prefix}_move_prev")
         with run_col3:
-            move_next = st.button("다음 1봉", use_container_width=True, key=f"{prefix}_move_next")
+            move_next = st.button("다음 1봉", width="stretch", key=f"{prefix}_move_next")
 
     trigger_error = None
     if run_lookup:
@@ -604,7 +661,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
             f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
         )
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width="stretch")
 
         st.markdown("---")
         st.markdown(f"#### {panel_title}")
@@ -632,7 +689,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                 current_watch_path = _interest_watch_monthly_path()
                 st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
 
-        if st.button("현재 차트 데이터 저장", use_container_width=True, key=f"{prefix}_save"):
+        if st.button("현재 차트 데이터 저장", width="stretch", key=f"{prefix}_save"):
             try:
                 snap_date, snap_close = _extract_last_bar_snapshot(
                     code=str(state["code"]),
@@ -729,10 +786,10 @@ def _render_interest_watch_data() -> None:
 
             nav1, nav2, nav3 = st.columns([1, 1, 4])
             with nav1:
-                if st.button("이전 10개", use_container_width=True, key="watch_prev_page"):
+                if st.button("이전 10개", width="stretch", key="watch_prev_page"):
                     st.session_state[page_key] = max(0, int(st.session_state[page_key]) - 1)
             with nav2:
-                if st.button("다음 10개", use_container_width=True, key="watch_next_page"):
+                if st.button("다음 10개", width="stretch", key="watch_next_page"):
                     st.session_state[page_key] = min(total_pages - 1, int(st.session_state[page_key]) + 1)
             with nav3:
                 st.caption(f"페이지 {int(st.session_state[page_key]) + 1}/{total_pages} | 총 {total_rows}건")
@@ -807,7 +864,7 @@ def _render_interest_watch_data() -> None:
             try:
                 table_event = st.dataframe(
                     styled_action,
-                    use_container_width=True,
+                    width="stretch",
                     on_select="rerun",
                     selection_mode="single-row",
                     key="watch_action_table",
@@ -815,13 +872,13 @@ def _render_interest_watch_data() -> None:
                 if table_event is not None and hasattr(table_event, "selection"):
                     selected_rows = list(getattr(table_event.selection, "rows", []) or [])
             except TypeError:
-                st.dataframe(styled_action, use_container_width=True)
+                st.dataframe(styled_action, width="stretch")
 
             c1, c2 = st.columns([1, 5])
             with c1:
-                chart_clicked = st.button("차트", key="watch_action_chart", use_container_width=True)
+                chart_clicked = st.button("차트", key="watch_action_chart", width="stretch")
             with c2:
-                delete_clicked = st.button("삭제", key="watch_action_delete", use_container_width=True)
+                delete_clicked = st.button("삭제", key="watch_action_delete", width="stretch")
 
             if selected_rows:
                 st.session_state[selected_idx_key] = int(start + int(selected_rows[0]))
@@ -856,7 +913,7 @@ def _render_interest_watch_data() -> None:
                 with confirm_cols[0]:
                     st.warning(f"삭제하시겠습니까? {'(' + pending_name + ')' if pending_name else ''}")
                 with confirm_cols[1]:
-                    if st.button("예", key="watch_delete_yes", use_container_width=True):
+                    if st.button("예", key="watch_delete_yes", width="stretch"):
                         try:
                             drop_idx = int(pending_idx)
                             if 0 <= drop_idx < len(wdf):
@@ -868,7 +925,7 @@ def _render_interest_watch_data() -> None:
                         except Exception as del_e:
                             st.error(f"삭제 실패: {del_e}")
                 with confirm_cols[2]:
-                    if st.button("아니오", key="watch_delete_no", use_container_width=True):
+                    if st.button("아니오", key="watch_delete_no", width="stretch"):
                         st.session_state.pop("watch_delete_pending_idx", None)
                         st.session_state.pop("watch_delete_pending_name", None)
                         st.rerun()
@@ -932,11 +989,11 @@ def _render_interest_watch_data() -> None:
 
             mv1, mv2, mv3, mv4, mv5 = st.columns([1, 1, 1, 4, 1])
             with mv1:
-                move_prev = st.button("이전 1봉", key="watch_chart_prev", use_container_width=True)
+                move_prev = st.button("이전 1봉", key="watch_chart_prev", width="stretch")
             with mv2:
-                move_home = st.button("처음위치로", key="watch_chart_home", use_container_width=True)
+                move_home = st.button("처음위치로", key="watch_chart_home", width="stretch")
             with mv3:
-                move_next = st.button("다음 1봉", key="watch_chart_next", use_container_width=True)
+                move_next = st.button("다음 1봉", key="watch_chart_next", width="stretch")
             with mv4:
                 memo_input = st.text_area(
                     "메모",
@@ -946,7 +1003,7 @@ def _render_interest_watch_data() -> None:
                     height=68,
                 )
             with mv5:
-                memo_save_clicked = st.button("메모저장", key="watch_chart_memo_save", use_container_width=True)
+                memo_save_clicked = st.button("메모저장", key="watch_chart_memo_save", width="stretch")
 
             st.markdown(
                 """
@@ -1021,7 +1078,7 @@ div[data-testid="stTextArea"] textarea {
                     f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                     f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                 )
-                st.pyplot(fig, use_container_width=True)
+                st.pyplot(fig, width="stretch")
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
@@ -1047,7 +1104,7 @@ def _render_saved_pattern_data() -> None:
         summary_rows.append({"구분": label, "파일명": filename, "행수": count})
 
     st.markdown("#### 기록 파일 요약")
-    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
     st.markdown("#### 기록 데이터")
     record_file_label = st.selectbox(
@@ -1102,10 +1159,10 @@ def _render_saved_pattern_data() -> None:
 
             nav1, nav2, nav3 = st.columns([1, 1, 4])
             with nav1:
-                if st.button("이전 10개", use_container_width=True, key="pattern_prev_page"):
+                if st.button("이전 10개", width="stretch", key="pattern_prev_page"):
                     st.session_state[page_key] = max(0, int(st.session_state[page_key]) - 1)
             with nav2:
-                if st.button("다음 10개", use_container_width=True, key="pattern_next_page"):
+                if st.button("다음 10개", width="stretch", key="pattern_next_page"):
                     st.session_state[page_key] = min(total_pages - 1, int(st.session_state[page_key]) + 1)
             with nav3:
                 st.caption(f"페이지 {int(st.session_state[page_key]) + 1}/{total_pages} | 총 {total_rows}건")
@@ -1141,7 +1198,7 @@ def _render_saved_pattern_data() -> None:
             try:
                 table_event = st.dataframe(
                     table_df,
-                    use_container_width=True,
+                    width="stretch",
                     column_config=pattern_table_column_config,
                     on_select="rerun",
                     selection_mode="single-row",
@@ -1152,13 +1209,13 @@ def _render_saved_pattern_data() -> None:
             except TypeError:
                 st.dataframe(
                     table_df,
-                    use_container_width=True,
+                    width="stretch",
                     column_config=pattern_table_column_config,
                 )
 
             c1, c2 = st.columns([1, 5])
             with c1:
-                chart_clicked = st.button("차트", key="pattern_action_chart", use_container_width=True)
+                chart_clicked = st.button("차트", key="pattern_action_chart", width="stretch")
 
             if selected_rows:
                 st.session_state[selected_idx_key] = int(start + int(selected_rows[0]))
@@ -1223,11 +1280,11 @@ def _render_saved_pattern_data() -> None:
 
             mv1, mv2, mv3, _ = st.columns([1, 1, 1, 3])
             with mv1:
-                move_prev = st.button("이전 1봉", key="pattern_chart_prev", use_container_width=True)
+                move_prev = st.button("이전 1봉", key="pattern_chart_prev", width="stretch")
             with mv2:
-                move_home = st.button("처음위치로", key="pattern_chart_home", use_container_width=True)
+                move_home = st.button("처음위치로", key="pattern_chart_home", width="stretch")
             with mv3:
-                move_next = st.button("다음 1봉", key="pattern_chart_next", use_container_width=True)
+                move_next = st.button("다음 1봉", key="pattern_chart_next", width="stretch")
 
             if move_home:
                 state["target_date"] = str(state.get("origin_target_date", state.get("target_date")))
@@ -1270,7 +1327,7 @@ def _render_saved_pattern_data() -> None:
                     f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                     f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                 )
-                st.pyplot(fig, use_container_width=True)
+                st.pyplot(fig, width="stretch")
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
@@ -1362,6 +1419,41 @@ def _latest_timeframe_ma10_metrics(code: str, timeframe: str) -> dict:
     return {
         "close": float(close_val) if pd.notna(close_val) else None,
         "ma10": float(ma10_val) if pd.notna(ma10_val) else None,
+        "breakout_rate": (float(breakout_rate) * 100.0) if breakout_rate is not None else None,
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _latest_timeframe_ma240_metrics(code: str, timeframe: str) -> dict:
+    loader = load_weekly if timeframe == "weekly" else load_monthly
+    try:
+        df = loader(str(code).zfill(6))
+    except Exception:
+        return {"close": None, "ma240": None, "breakout_rate": None}
+
+    if df is None or df.empty:
+        return {"close": None, "ma240": None, "breakout_rate": None}
+
+    work = df.copy()
+    work["date"] = pd.to_datetime(work.get("date"), errors="coerce")
+    work["close"] = pd.to_numeric(work.get("close"), errors="coerce")
+    work["ma240"] = pd.to_numeric(work.get("ma240"), errors="coerce")
+    work = work.dropna(subset=["date"]).sort_values("date")
+    if work.empty:
+        return {"close": None, "ma240": None, "breakout_rate": None}
+
+    recent = work.iloc[-1]
+    close_val = pd.to_numeric(recent.get("close"), errors="coerce")
+    ma240_val = pd.to_numeric(recent.get("ma240"), errors="coerce")
+
+    if pd.notna(close_val) and pd.notna(ma240_val) and float(ma240_val) != 0.0:
+        breakout_rate = (float(close_val) / float(ma240_val)) - 1.0
+    else:
+        breakout_rate = None
+
+    return {
+        "close": float(close_val) if pd.notna(close_val) else None,
+        "ma240": float(ma240_val) if pd.notna(ma240_val) else None,
         "breakout_rate": (float(breakout_rate) * 100.0) if breakout_rate is not None else None,
     }
 
@@ -1514,6 +1606,7 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
         current_price = latest.get("current_price")
         price_date = latest.get("price_date")
         weekly = _latest_timeframe_ma10_metrics(str(row["종목코드"]), timeframe="weekly")
+        weekly_240 = _latest_timeframe_ma240_metrics(str(row["종목코드"]), timeframe="weekly")
         monthly = _latest_timeframe_ma10_metrics(str(row["종목코드"]), timeframe="monthly")
 
         buy_price = pd.to_numeric(row["매수가"], errors="coerce")
@@ -1539,8 +1632,10 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
                 "수익액": profit_amount,
                 "수익률": (float(profit_rate) * 100.0) if profit_rate is not None else None,
                 "주봉 10이평": weekly.get("ma10"),
+                "주봉 240이평": weekly_240.get("ma240"),
                 "월봉 10이평": monthly.get("ma10"),
                 "이격도(주)": weekly.get("breakout_rate"),
+                "이격도(주240)": weekly_240.get("breakout_rate"),
                 "이격도(월)": monthly.get("breakout_rate"),
             }
         )
@@ -1558,8 +1653,10 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
         "수익액",
         "수익률",
         "주봉 10이평",
+        "주봉 240이평",
         "월봉 10이평",
         "이격도(주)",
+        "이격도(주240)",
         "이격도(월)",
     ]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -1612,13 +1709,63 @@ def _render_output_holdings_data() -> None:
     st.caption(f"{HOLDINGS_CSV} 데이터를 조회합니다.")
     holdings_path = HOLDINGS_CSV
     os.makedirs(os.path.dirname(holdings_path), exist_ok=True)
+    master = get_master_table()
 
     st.markdown("#### 보유 종목 추가")
+    add_code_candidates: list[str] = []
+    add_name_prefix = st.text_input(
+        "종목명 앞 2글자 입력",
+        value="",
+        max_chars=20,
+        key="holdings_add_name_prefix",
+    )
+    if len(str(add_name_prefix).strip()) >= 2:
+        if not master.empty and {"code", "name"}.issubset(set(master.columns)):
+            filtered = master[master["name"].astype(str).str.startswith(str(add_name_prefix).strip())].copy()
+            if not filtered.empty:
+                filtered = filtered.sort_values(["name", "code"])
+                add_code_candidates = [
+                    f"{str(r['name']).strip()} ({str(r['code']).zfill(6)})"
+                    for _, r in filtered.iterrows()
+                ]
+
+    add_stock_pick = st.selectbox(
+        "추천 종목 리스트",
+        options=add_code_candidates if add_code_candidates else [""],
+        index=0,
+        key="holdings_add_stock_pick",
+    )
+
+    selected_code = ""
+    selected_name = ""
+    picked_text = str(add_stock_pick).strip()
+    if picked_text:
+        m = re.match(r"^(.*)\((\d{6})\)$", picked_text)
+        if m:
+            selected_name = str(m.group(1)).strip()
+            selected_code = str(m.group(2)).strip().zfill(6)
+
+    if st.session_state.get("holdings_add_code", "") != selected_code:
+        st.session_state["holdings_add_code"] = selected_code
+    if st.session_state.get("holdings_add_name", "") != selected_name:
+        st.session_state["holdings_add_name"] = selected_name
+
     add_c1, add_c2, add_c3, add_c4, add_c5 = st.columns([1.1, 1.3, 1.0, 0.9, 2.2])
     with add_c1:
-        add_code = st.text_input("종목코드", value="", max_chars=6, key="holdings_add_code")
+        add_code = st.text_input(
+            "종목코드",
+            value="",
+            max_chars=6,
+            key="holdings_add_code",
+            disabled=True,
+        )
     with add_c2:
-        add_name = st.text_input("종목명", value="", key="holdings_add_name")
+        add_name = st.text_input(
+            "종목명",
+            value="",
+            key="holdings_add_name",
+            disabled=True,
+        )
     with add_c3:
         add_buy = st.text_input("매수가", value="", key="holdings_add_buy")
     with add_c4:
@@ -1626,11 +1773,14 @@ def _render_output_holdings_data() -> None:
     with add_c5:
         add_memo = st.text_input("메모", value="", key="holdings_add_memo")
 
-    if st.button("보유 종목 추가", key="holdings_add_submit", use_container_width=True):
+    if st.button("보유 종목 추가", key="holdings_add_submit", width="stretch"):
         try:
             code = str(add_code).strip().replace(" ", "").zfill(6)
+            resolved_name = str(add_name).strip()
             if not re.fullmatch(r"\d{6}", code):
-                raise ValueError("종목코드는 6자리 숫자로 입력하세요.")
+                raise ValueError("추천 종목 리스트에서 종목을 선택하세요.")
+            if not resolved_name:
+                raise ValueError("추천 종목 리스트에서 종목을 선택하세요.")
 
             buy_val = pd.to_numeric(str(add_buy).strip().replace(",", ""), errors="coerce")
             qty_val = pd.to_numeric(str(add_qty).strip().replace(",", ""), errors="coerce")
@@ -1638,14 +1788,6 @@ def _render_output_holdings_data() -> None:
                 raise ValueError("매수가는 0보다 큰 숫자로 입력하세요.")
             if pd.isna(qty_val) or float(qty_val) <= 0:
                 raise ValueError("수량은 0보다 큰 숫자로 입력하세요.")
-
-            resolved_name = str(add_name).strip()
-            if not resolved_name:
-                master = get_master_table()
-                if not master.empty and {"code", "name"}.issubset(set(master.columns)):
-                    hit = master[master["code"].astype(str).str.zfill(6) == code]
-                    if not hit.empty:
-                        resolved_name = str(hit.iloc[0].get("name", "")).strip()
 
             _add_holding_row(
                 holdings_path=holdings_path,
@@ -1740,6 +1882,8 @@ def _render_output_holdings_data() -> None:
                 "수익률",
                 "주봉 10이평",
                 "이격도(주)",
+                "주봉 240이평",
+                "이격도(주240)",
                 "월봉 10이평",
                 "이격도(월)",
                 "메모",
@@ -1762,7 +1906,7 @@ def _render_output_holdings_data() -> None:
                     return "color: #1565c0;"
                 return ""
 
-            right_align_cols = ["매수가", "현재 종가", "수익률", "이격도(주)", "이격도(월)"]
+            right_align_cols = ["매수가", "현재 종가", "수익률", "이격도(주)", "이격도(주240)", "이격도(월)"]
             center_align_cols = ["종목코드", "종목명", "가격일자"]
             styled_action = (
                 action_view.style
@@ -1771,15 +1915,17 @@ def _render_output_holdings_data() -> None:
                         "매수가": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "현재 종가": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "주봉 10이평": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
+                        "주봉 240이평": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "월봉 10이평": lambda x: "" if pd.isna(x) else f"{x:,.0f}",
                         "수익률": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
                         "이격도(주)": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
+                        "이격도(주240)": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
                         "이격도(월)": lambda x: "" if pd.isna(x) else f"{x:.2f}%",
                     }
                 )
                 .set_properties(subset=right_align_cols, **{"text-align": "right"})
                 .set_properties(subset=center_align_cols, **{"text-align": "center"})
-                .map(_pos_neg_color, subset=["수익률", "이격도(주)", "이격도(월)"])
+                .map(_pos_neg_color, subset=["수익률", "이격도(주)", "이격도(주240)", "이격도(월)"])
             )
 
             holdings_column_config = {
@@ -1790,7 +1936,6 @@ def _render_output_holdings_data() -> None:
             try:
                 table_event = st.dataframe(
                     styled_action,
-                    use_container_width=False,
                     width=1600,
                     column_config=holdings_column_config,
                     on_select="rerun",
@@ -1802,16 +1947,15 @@ def _render_output_holdings_data() -> None:
             except TypeError:
                 st.dataframe(
                     styled_action,
-                    use_container_width=False,
                     width=1600,
                     column_config=holdings_column_config,
                 )
 
             btn1, btn2, btn3 = st.columns([1, 1, 4])
             with btn1:
-                chart_clicked = st.button("차트", key="holdings_action_chart", use_container_width=True)
+                chart_clicked = st.button("차트", key="holdings_action_chart", width="stretch")
             with btn2:
-                delete_clicked = st.button("삭제", key="holdings_action_delete", use_container_width=True)
+                delete_clicked = st.button("삭제", key="holdings_action_delete", width="stretch")
 
             if selected_rows:
                 st.session_state[selected_idx_key] = int(selected_rows[0])
@@ -1879,7 +2023,7 @@ def _render_output_holdings_data() -> None:
                 with dc1:
                     st.warning(f"삭제하시겠습니까? {'(' + pending_name + ')' if pending_name else ''}")
                 with dc2:
-                    if st.button("예", key="holdings_delete_yes", use_container_width=True):
+                    if st.button("예", key="holdings_delete_yes", width="stretch"):
                         try:
                             raw_idx = int(pending_raw)
 
@@ -1912,7 +2056,7 @@ def _render_output_holdings_data() -> None:
                         except Exception as del_e:
                             st.error(f"삭제 실패: {del_e}")
                 with dc3:
-                    if st.button("아니오", key="holdings_delete_no", use_container_width=True):
+                    if st.button("아니오", key="holdings_delete_no", width="stretch"):
                         st.session_state.pop("holdings_delete_pending_raw", None)
                         st.session_state.pop("holdings_delete_pending_name", None)
                         st.session_state.pop("holdings_delete_pending_code", None)
@@ -1978,9 +2122,9 @@ def _render_output_holdings_data() -> None:
 
                 mv1, mv2, mv3, mv4 = st.columns([1, 1, 4, 1])
                 with mv1:
-                    move_prev = st.button("이전 1봉", key="holdings_chart_prev", use_container_width=True)
+                    move_prev = st.button("이전 1봉", key="holdings_chart_prev", width="stretch")
                 with mv2:
-                    move_next = st.button("다음 1봉", key="holdings_chart_next", use_container_width=True)
+                    move_next = st.button("다음 1봉", key="holdings_chart_next", width="stretch")
                 with mv3:
                     memo_input = st.text_area(
                         "메모",
@@ -1990,7 +2134,7 @@ def _render_output_holdings_data() -> None:
                         height=68,
                     )
                 with mv4:
-                    memo_save_clicked = st.button("메모저장", key="holdings_chart_memo_save", use_container_width=True)
+                    memo_save_clicked = st.button("메모저장", key="holdings_chart_memo_save", width="stretch")
 
                 if memo_save_clicked:
                     try:
@@ -2065,7 +2209,7 @@ div[data-testid="stTextArea"] textarea {
                         f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                         f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                     )
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width="stretch")
                 except Exception as chart_e:
                     st.error(f"차트 생성 실패: {chart_e}")
             else:
@@ -2125,12 +2269,23 @@ def get_data_status(data_dir: str) -> dict:
     }
 
     master_csv = os.path.join(data_dir, "master", "kospi_tickers.csv")
+    code_market: dict = {}
+    market_names = ("KOSPI", "KOSDAQ", "ETF")
+    status["markets"] = {
+        m: {"count": 0, "file_count": 0, "latest_trade_date": None,
+            "latest_collection_date": None, "latest_collection_time": None, "_key": None}
+        for m in market_names
+    }
     if os.path.isfile(master_csv):
         try:
-            mdf = pd.read_csv(master_csv)
+            mdf = pd.read_csv(master_csv, dtype={"code": str})
             market_series = mdf.get("market", pd.Series(dtype=str)).fillna("").astype(str).str.upper()
             status["kospi_count"] = int((market_series == "KOSPI").sum())
             status["kosdaq_count"] = int((market_series == "KOSDAQ").sum())
+            for code, mk in zip(mdf["code"].astype(str).str.zfill(6), market_series):
+                grp = "KOSDAQ" if mk.startswith("KOSDAQ") else ("ETF" if mk.startswith("ETF") else "KOSPI")
+                code_market[code] = grp
+                status["markets"][grp]["count"] += 1
         except Exception:
             pass
 
@@ -2145,16 +2300,34 @@ def get_data_status(data_dir: str) -> dict:
     latest_collection = None
     latest_collection_time = None
     latest_collection_key = None
+    counted_codes: set = set()
     for file_name in daily_files:
         last_line = _read_last_non_empty_line(os.path.join(daily_dir, file_name))
         if not last_line:
             continue
 
         cols = [c.strip() for c in last_line.split(",")]
+        file_code = file_name.split("_", 1)[0]
+        mstat = status["markets"].get(code_market.get(file_code))
+        # 종목명 변경으로 남은 옛 파일·상폐 파일은 제외하고, 마스터 종목 코드당 1회만 집계한다.
+        if mstat is not None and file_code not in counted_codes:
+            counted_codes.add(file_code)
+            mstat["file_count"] += 1
         if cols:
             trade_date = cols[0]
             if trade_date and (latest_trade is None or trade_date > latest_trade):
                 latest_trade = trade_date
+            if mstat is not None and trade_date and (
+                mstat["latest_trade_date"] is None or trade_date > mstat["latest_trade_date"]
+            ):
+                mstat["latest_trade_date"] = trade_date
+
+        if len(cols) >= 15 and cols[13] and cols[14] and mstat is not None:
+            key = f"{cols[13]} {cols[14]}"
+            if mstat["_key"] is None or key > mstat["_key"]:
+                mstat["_key"] = key
+                mstat["latest_collection_date"] = cols[13]
+                mstat["latest_collection_time"] = cols[14]
 
         if len(cols) >= 14:
             collection_date = cols[13]
@@ -2426,17 +2599,24 @@ def _render_case_gallery(
         st.session_state[gallery_sig_key] = current_sig
         st.session_state[thumb_selected_key] = 0
 
-    if idx_key not in st.session_state or st.session_state[idx_key] >= len(gallery_items):
-        st.session_state[idx_key] = 0
+    current_idx = min(
+        max(int(st.session_state.get(idx_key, 0)), 0),
+        len(gallery_items) - 1,
+    )
+    st.session_state[idx_key] = current_idx
     if thumb_selected_key not in st.session_state or int(st.session_state[thumb_selected_key]) >= len(gallery_items):
         st.session_state[thumb_selected_key] = int(st.session_state[idx_key])
 
     nav1, nav2, nav3 = st.columns([1, 1, 4])
     with nav1:
-        if st.button("이전", key=f"prev_{case_key}"):
+        if st.button("이전", key=f"prev_{case_key}", disabled=current_idx == 0):
             st.session_state[idx_key] = max(0, st.session_state[idx_key] - 1)
     with nav2:
-        if st.button("다음", key=f"next_{case_key}"):
+        if st.button(
+            "다음",
+            key=f"next_{case_key}",
+            disabled=current_idx == len(gallery_items) - 1,
+        ):
             st.session_state[idx_key] = min(len(gallery_items) - 1, st.session_state[idx_key] + 1)
 
     selected = gallery_items[st.session_state[idx_key]]
@@ -2452,7 +2632,7 @@ def _render_case_gallery(
         ),
         unsafe_allow_html=True,
     )
-    st.image(selected["image_path"], use_container_width=True)
+    st.image(selected["image_path"], width="stretch")
     st.caption(
         f"{st.session_state[idx_key] + 1}/{len(gallery_items)} | {selected.get('caption', '')} | "
         f"돌파율 {float(selected.get('breakout_pct', 0.0)):.2f}% | {vol_text}"
@@ -2489,7 +2669,7 @@ def _render_case_gallery(
 
     if st.button(
         "현재 확대 종목 관심저장",
-        use_container_width=True,
+        width="stretch",
         key=f"review_interest_save_{case_key}",
         disabled=not can_save,
     ):
@@ -2910,6 +3090,8 @@ if "data_store_running" not in st.session_state:
     st.session_state.data_store_running = False
 if "data_store_run_requested" not in st.session_state:
     st.session_state.data_store_run_requested = False
+if "data_store_target" not in st.session_state:
+    st.session_state.data_store_target = ["KOSPI", "KOSDAQ", "ETF"]
 if "scan_market_running" not in st.session_state:
     st.session_state.scan_market_running = False
 if "scan_market_run_requested" not in st.session_state:
@@ -2918,11 +3100,15 @@ if "scan_progress_value" not in st.session_state:
     st.session_state.scan_progress_value = 0.0
 if "scan_progress_text" not in st.session_state:
     st.session_state.scan_progress_text = "스캔 대기 중"
+if "data_store_progress_value" not in st.session_state:
+    st.session_state.data_store_progress_value = 0.0
+if "data_store_progress_text" not in st.session_state:
+    st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
 
 st.sidebar.title("KRX FDR")
 for menu in MENU_ITEMS:
     button_type = "primary" if st.session_state.selected_menu == menu else "secondary"
-    if st.sidebar.button(menu, key=f"menu_btn_{menu}", use_container_width=True, type=button_type):
+    if st.sidebar.button(menu, key=f"menu_btn_{menu}", width="stretch", type=button_type):
         st.session_state.selected_menu = menu
         st.query_params["menu"] = str(MENU_ITEMS.index(menu))
         st.rerun()
@@ -3071,58 +3257,82 @@ if top_right is not None:
 if st.session_state.show_intro and scan_status["case_counts"]:
     st.markdown("### 케이스별 돌파 건수")
     case_df = pd.DataFrame(scan_status["case_counts"])
-    st.dataframe(case_df, use_container_width=True, hide_index=True)
+    st.dataframe(case_df, width="stretch", hide_index=True)
 
 if not st.session_state.show_intro:
     st.markdown("<div class='panel'>", unsafe_allow_html=True)
     if selected_menu == "1. 데이터 저장":
         st.caption("`data_store.py` 실행 로그를 아래에서 확인합니다.")
         run_status_box = st.empty()
+        data_progress_box = st.empty()
 
         if st.session_state.data_store_run_requested and not st.session_state.data_store_running:
             st.session_state.data_store_run_requested = False
             st.session_state.data_store_running = True
             st.rerun()
 
-        col_run, col_clear = st.columns([1, 1])
-        latest_collection_date = data_status.get("latest_collection_date")
-        latest_collection_time = data_status.get("latest_collection_time")
+        market_labels = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ", "ETF": "ETF"}
         today_text = date.today().strftime("%Y-%m-%d")
-        same_day_after_5 = (
-            latest_collection_date == today_text
-            and isinstance(latest_collection_time, str)
-            and latest_collection_time >= "17:00"
-        )
 
-        run_button_label = "데이터 업데이트 실행"
-        if st.session_state.awaiting_update_confirm:
-            run_button_label = "확인: 데이터 최신, 다시 눌러 업데이트"
-        if st.session_state.data_store_running:
-            run_button_label = "데이터 업데이트 실행중..."
+        st.markdown("##### 시장별 현황")
+        status_cols = st.columns(3, gap="medium")
+        for scol, mkey in zip(status_cols, market_labels):
+            mstat = data_status["markets"][mkey]
+            with scol:
+                st.markdown(
+                    f"<div class='status-card data-card'><div class='status-title'>{mkey}</div>"
+                    f"<div class='status-value'>{mstat['file_count']:,} / {mstat['count']:,}종목</div>"
+                    f"<div class='status-title'>저장 일자: {mstat['latest_trade_date'] or '-'}</div>"
+                    f"<div class='status-title'>수집: {mstat['latest_collection_date'] or '-'} {mstat['latest_collection_time'] or ''}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
-        with col_run:
-            run_clicked = st.button(
-                run_button_label,
-                type="primary",
-                use_container_width=True,
-                key="run_data_store_button",
-                disabled=st.session_state.data_store_running,
+        def _is_fresh(mkey: str) -> bool:
+            mstat = data_status["markets"][mkey]
+            return (
+                mstat["latest_collection_date"] == today_text
+                and isinstance(mstat["latest_collection_time"], str)
+                and mstat["latest_collection_time"] >= "17:00"
             )
-        with col_clear:
-            clear_clicked = st.button("로그 지우기", use_container_width=True, disabled=st.session_state.data_store_running)
+
+        running = st.session_state.data_store_running
+        btn_cols = st.columns(4)
+        clicked_target = None
+        for bcol, (mkey, mlabel) in zip(btn_cols[:3], market_labels.items()):
+            label = f"{mlabel} 업데이트"
+            if st.session_state.awaiting_update_confirm == mkey:
+                label = f"확인: {mlabel} 최신, 다시 눌러 업데이트"
+            if running and st.session_state.data_store_target == [mkey]:
+                label = f"{mlabel} 업데이트 실행중..."
+            with bcol:
+                if st.button(label, type="primary", width="stretch", key=f"run_data_store_{mkey}", disabled=running):
+                    clicked_target = mkey
+        with btn_cols[3]:
+            if st.button("전체 업데이트", width="stretch", key="run_data_store_ALL", disabled=running):
+                clicked_target = "ALL"
+        clear_clicked = st.button("로그 지우기", width="stretch", disabled=running)
 
         if clear_clicked:
             st.session_state.data_store_logs = []
             st.session_state.data_store_last_returncode = None
             st.session_state.awaiting_update_confirm = False
+            st.session_state.data_store_progress_value = 0.0
+            st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
 
-        execute_update = False
+        data_progress_box.progress(
+            float(st.session_state.data_store_progress_value),
+            text=st.session_state.data_store_progress_text,
+        )
 
-        if run_clicked:
-            if same_day_after_5 and not st.session_state.awaiting_update_confirm:
-                st.session_state.awaiting_update_confirm = True
+        if clicked_target:
+            targets = list(market_labels) if clicked_target == "ALL" else [clicked_target]
+            already_fresh = all(_is_fresh(m) for m in targets)
+            if already_fresh and st.session_state.awaiting_update_confirm != clicked_target:
+                st.session_state.awaiting_update_confirm = clicked_target
             else:
                 st.session_state.awaiting_update_confirm = False
+                st.session_state.data_store_target = targets
                 st.session_state.data_store_run_requested = True
                 st.rerun()
 
@@ -3130,8 +3340,14 @@ if not st.session_state.show_intro:
             st.warning("데이터가 최신 입니다. 그래도 업데이트 하시겠습니까? 실행 버튼을 한 번 더 누르세요.")
 
         if st.session_state.data_store_running:
-            run_status_box.info("data_store.py 실행중입니다.")
-            logs, return_code = run_data_store_and_collect_logs()
+            run_status_box.info(f"data_store.py 실행중입니다. ({', '.join(st.session_state.data_store_target)})")
+            st.session_state.data_store_progress_value = 0.0
+            st.session_state.data_store_progress_text = "전체 0.00% (RAW 0.00% + DERIVED 0.00%) | 시작"
+            data_progress_box.progress(0.0, text=st.session_state.data_store_progress_text)
+            logs, return_code = run_data_store_and_collect_logs(
+                data_progress_box, st.session_state.data_store_target
+            )
+            get_data_status.clear()
             st.session_state.data_store_logs = logs
             st.session_state.data_store_last_returncode = return_code
             st.session_state.data_store_running = False
@@ -3157,6 +3373,7 @@ if not st.session_state.show_intro:
 
         if st.session_state.scan_market_run_requested and not st.session_state.scan_market_running:
             st.session_state.scan_market_run_requested = False
+            start_scan_job()
             st.session_state.scan_market_running = True
             st.rerun()
 
@@ -3177,14 +3394,14 @@ if not st.session_state.show_intro:
             run_clicked = st.button(
                 run_button_label,
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="run_scan_market_button",
                 disabled=st.session_state.scan_market_running,
             )
         with col_clear:
             clear_clicked = st.button(
                 "로그 지우기",
-                use_container_width=True,
+                width="stretch",
                 key="clear_scan_log",
                 disabled=st.session_state.scan_market_running,
             )
@@ -3217,29 +3434,17 @@ if not st.session_state.show_intro:
         elif not st.session_state.scan_market_logs and not execute_scan:
             run_status_box.info("스캔 실행 전입니다. 버튼을 눌러 진행상황 로그를 확인하세요.")
 
+        # 다른 세션/새로고침 후에도 실행 중인 백그라운드 스캔에 다시 연결한다.
+        if is_scan_job_running():
+            st.session_state.scan_market_running = True
+
         if st.session_state.scan_market_running:
-            run_status_box.info("scan_market.py 실행중입니다.")
-            st.session_state.scan_progress_value = 0.0
-            st.session_state.scan_progress_text = "스캔 시작"
-            scan_progress_box.progress(0.0, text=st.session_state.scan_progress_text)
-            logs, return_code = run_scan_market_and_collect_logs(scan_progress_box)
-            st.session_state.scan_market_logs = logs
-            st.session_state.scan_market_last_returncode = return_code
-            latest_scan_status = get_scan_status(OUTPUT_DIR)
-            st.session_state.scan_market_latest_dir = latest_scan_status.get("latest_scan_dir")
-            st.session_state.scan_market_running = False
-
-            scan_progress_box.progress(
-                float(st.session_state.scan_progress_value),
-                text=st.session_state.scan_progress_text,
-            )
-
-            if return_code == 0:
-                run_status_box.success("스캔이 완료되었습니다.")
-            else:
-                run_status_box.error(f"스캔 실행 중 오류가 발생했습니다. 종료 코드: {return_code}")
-
-        if st.session_state.scan_market_logs:
+            run_status_box.info("scan_market.py 백그라운드 실행중입니다. 다른 메뉴로 이동해도 계속 진행됩니다.")
+            scan_progress_box.empty()
+            st.fragment(run_every=SCAN_REFRESH_SEC)(render_scan_job_status)()
+        elif st.session_state.scan_market_last_returncode == 0:
+            run_status_box.success("스캔이 완료되었습니다.")
+        if st.session_state.scan_market_logs and not st.session_state.scan_market_running:
             if st.session_state.scan_market_last_returncode == 0:
                 latest_dir = st.session_state.scan_market_latest_dir or scan_status.get("latest_scan_dir")
                 if latest_dir:
@@ -3366,7 +3571,7 @@ if not st.session_state.show_intro:
                     for key in keys:
                         label = REVIEW_CASE_LABELS.get(key, key)
                         btn_type = "primary" if st.session_state.review_selected_case == key else "secondary"
-                        if st.button(label, key=f"case_sel_{key}", use_container_width=True, type=btn_type):
+                        if st.button(label, key=f"case_sel_{key}", width="stretch", type=btn_type):
                             st.session_state.review_selected_case = key
 
             selected_key = st.session_state.review_selected_case
@@ -3396,5 +3601,5 @@ if not st.session_state.show_intro:
     else:
         st.caption("하단의 넓은 영역은 실제 종목/스캔 결과 차트가 표시될 자리입니다.")
         chart_df = build_mock_chart_data()
-        st.line_chart(chart_df, use_container_width=True, height=470)
+        st.line_chart(chart_df, width="stretch", height=470)
     st.markdown("</div>", unsafe_allow_html=True)

@@ -26,6 +26,8 @@ START_YEARS_AGO = 25
 SLEEP_SEC_BETWEEN_TICKERS = 0.12
 SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
+# 전체 시세를 메모리에 오래 유지하지 않으면서 디스크 쓰기 횟수를 줄이는 기준.
+RAW_SAVE_BUFFER_SIZE = 50
 
 MA_WINDOWS = [5, 10, 20, 120, 180, 240]
 
@@ -172,7 +174,7 @@ def attach_run_metadata(df: pd.DataFrame, metadata: Dict[str, str]) -> pd.DataFr
 def normalize_fdr_listing(df: pd.DataFrame) -> pd.DataFrame:
     """
     FDR StockListing 결과를 표준화.
-    기대 컬럼: Code, Name, Market
+    기대 컬럼: Code 또는 Symbol, Name, Market
     """
     if df is None or df.empty:
         return pd.DataFrame(columns=["code", "name", "market"])
@@ -182,7 +184,7 @@ def normalize_fdr_listing(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {}
     for col in result.columns:
         lower = str(col).strip().lower()
-        if lower == "code":
+        if lower in {"code", "symbol"}:
             col_map[col] = "code"
         elif lower == "name":
             col_map[col] = "name"
@@ -234,17 +236,15 @@ def _needs_krx_refresh(master_file: str) -> bool:
         return True
 
     try:
-        df = pd.read_csv(master_file, nrows=5000)
+        markets = pd.read_csv(master_file, usecols=["market"])["market"]
     except Exception:
         return True
 
-    if df.empty:
-        return True
-    if "market" not in df.columns:
+    if markets.empty:
         return True
 
-    market_values = set(df["market"].astype(str).str.upper().str.strip().unique())
-    return "KOSDAQ" not in market_values
+    market_values = set(markets.astype(str).str.upper().str.strip().unique())
+    return not {"KOSDAQ", "ETF/KR"}.issubset(market_values)
 
 
 def update_master(force: bool = False) -> pd.DataFrame:
@@ -260,27 +260,30 @@ def update_master(force: bool = False) -> pd.DataFrame:
         master_df["code"] = master_df["code"].astype(str).str.zfill(6)
         return master_df
 
-    print("[MASTER] KRX(KOSPI+KOSDAQ) 종목 목록 갱신 시작")
+    print("[MASTER] KRX(KOSPI+KOSDAQ+ETF) 종목 목록 갱신 시작")
 
     try:
         kospi_df = _fetch_listing_with_retry("KOSPI")
         time.sleep(SLEEP_SEC_BETWEEN_MASTER_CALLS)
         kosdaq_df = _fetch_listing_with_retry("KOSDAQ")
+        time.sleep(SLEEP_SEC_BETWEEN_MASTER_CALLS)
+        etf_df = _fetch_listing_with_retry("ETF/KR")
+        etf_df["market"] = "ETF/KR"
 
         master_df = (
-            pd.concat([kospi_df, kosdaq_df], ignore_index=True)
+            pd.concat([kospi_df, kosdaq_df, etf_df], ignore_index=True)
             .sort_values("code")
             .drop_duplicates(subset=["code"], keep="first")
             .reset_index(drop=True)
         )
 
         if master_df.empty:
-            raise RuntimeError("KOSPI+KOSDAQ 병합 결과가 비어 있습니다.")
+            raise RuntimeError("KOSPI+KOSDAQ+ETF 병합 결과가 비어 있습니다.")
 
         master_df.to_csv(MASTER_FILE, index=False, encoding="utf-8-sig")
         print(
             f"[MASTER] 저장 완료: {MASTER_FILE} / total={len(master_df)} "
-            f"(KOSPI={len(kospi_df)}, KOSDAQ={len(kosdaq_df)})"
+            f"(KOSPI={len(kospi_df)}, KOSDAQ={len(kosdaq_df)}, ETF={len(etf_df)})"
         )
         return master_df
 
@@ -293,7 +296,7 @@ def update_master(force: bool = False) -> pd.DataFrame:
         old_df["code"] = old_df["code"].astype(str).str.zfill(6)
         return old_df
 
-    raise RuntimeError("KRX(KOSPI+KOSDAQ) 종목 목록을 가져오지 못했습니다.")
+    raise RuntimeError("KRX(KOSPI+KOSDAQ+ETF) 종목 목록을 가져오지 못했습니다.")
 
 
 # =========================================================
@@ -402,6 +405,151 @@ def get_existing_last_date(file_path: str) -> Optional[str]:
         return None
 
 
+def get_existing_last_price_status(file_path: str) -> Optional[str]:
+    if not os.path.exists(file_path):
+        return None
+
+    try:
+        df = pd.read_csv(file_path)
+        if df.empty or "date" not in df.columns:
+            return None
+
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"])
+        if df.empty:
+            return None
+
+        if "price_status" not in df.columns:
+            return None
+
+        last_idx = df["date"].idxmax()
+        status = df.loc[last_idx, "price_status"]
+        if pd.isna(status):
+            return None
+
+        status = str(status).strip()
+        return status if status else None
+    except Exception:
+        return None
+
+
+def get_trailing_intraday_dates(file_path: str) -> List[str]:
+    """
+    마지막 저장일에서 과거로 거슬러 올라가며 연속된 '장중' 날짜를 수집.
+    예) [..., 2026-04-08(장중), 2026-04-09(장중)] -> ["2026-04-09", "2026-04-08"]
+    """
+    if not os.path.exists(file_path):
+        return []
+
+    try:
+        df = load_raw_daily(file_path)
+        if df.empty or "price_status" not in df.columns:
+            return []
+
+        df = (
+            df.sort_values("date")
+              .drop_duplicates(subset=["date"], keep="last")
+              .reset_index(drop=True)
+        )
+
+        targets: List[str] = []
+        for _, row in df.iloc[::-1].iterrows():
+            status = str(row.get("price_status", "")).strip()
+            if status == "장중":
+                targets.append(pd.to_datetime(row["date"]).strftime("%Y-%m-%d"))
+            else:
+                break
+
+        return targets
+    except Exception:
+        return []
+
+
+def repair_trailing_intraday_to_final(
+    code: str,
+    name: str,
+    file_path: str,
+    end_date: str,
+    run_meta: Dict[str, str],
+    save: bool = True,
+) -> Dict[str, int]:
+    """
+    마지막 저장일 기준 연속된 '장중' 구간 중 과거 날짜(< end_date)에 대해
+    과거 날짜가 2일 이상이면 범위로 조회해 종가 데이터를 덮어쓴다.
+    """
+    trailing = get_trailing_intraday_dates(file_path)
+    if not trailing:
+        return {"checked": 0, "repaired": 0}
+
+    # 오늘 날짜 장중 바는 장중 업데이트 루틴에서 처리하고,
+    # 과거 날짜의 장중 표기만 종가로 보정한다.
+    historical_targets = [d for d in trailing if d < end_date]
+    if not historical_targets:
+        return {"checked": len(trailing), "repaired": 0}
+
+    old_df = load_raw_daily(file_path)
+    if old_df.empty:
+        return {"checked": len(trailing), "repaired": 0}
+
+    final_meta = dict(run_meta)
+    final_meta["price_status"] = "종가"
+
+    target_dates = sorted(historical_targets)
+    start_date = target_dates[0]
+    end_date = target_dates[-1]
+    fetch_end_date = next_day(end_date)
+
+    try:
+        fetched_df = fetch_ohlcv_with_retry(
+            code=code,
+            start_date=start_date,
+            end_date=fetch_end_date,
+            metadata=final_meta,
+        )
+
+        if fetched_df.empty:
+            return {"checked": len(trailing), "repaired": 0}
+
+        fetched_df = fetched_df.copy()
+        fetched_df["date"] = pd.to_datetime(fetched_df["date"]).dt.normalize()
+        target_timestamps = pd.to_datetime(target_dates)
+        repaired_df = fetched_df[fetched_df["date"].isin(target_timestamps)]
+        if repaired_df.empty:
+            return {"checked": len(trailing), "repaired": 0}
+
+        if len(target_dates) == 1:
+            print(f"[RAW][REPAIR] {code} {name} {start_date} 장중 -> 종가 재조회 완료")
+        else:
+            print(
+                f"[RAW][REPAIR] {code} {name} {start_date}~{end_date} "
+                "장중 -> 종가 범위 재조회 완료"
+            )
+    except Exception as e:
+        if len(target_dates) == 1:
+            print(f"[RAW][REPAIR][WARN] {code} {name} {start_date} 재조회 실패: {e}")
+        else:
+            print(
+                f"[RAW][REPAIR][WARN] {code} {name} {start_date}~{end_date} "
+                f"범위 재조회 실패: {e}"
+            )
+        return {"checked": len(trailing), "repaired": 0}
+
+    merged = (
+        pd.concat([old_df, repaired_df], ignore_index=True)
+          .sort_values("date")
+          .drop_duplicates(subset=["date"], keep="last")
+          .reset_index(drop=True)
+    )
+    if save:
+        save_raw_daily(file_path, merged)
+
+    return {
+        "checked": len(trailing),
+        "repaired": len(repaired_df),
+        "data": merged,
+    }
+
+
 def raw_schema_needs_refresh(file_path: str) -> bool:
     if not os.path.exists(file_path):
         return False
@@ -450,7 +598,7 @@ def load_raw_daily(file_path: str) -> pd.DataFrame:
     )
     return df
 
-def update_one_raw_stock(code: str, name: str) -> Dict:
+def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
     file_path = raw_file_path(code, name)
     end_date = today_str("%Y-%m-%d")
     run_meta = get_run_metadata()
@@ -460,17 +608,46 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
         start_date = initial_start_date()
         mode = "REFRESH"
     else:
+        repair_info = repair_trailing_intraday_to_final(
+            code=code,
+            name=name,
+            file_path=file_path,
+            end_date=end_date,
+            run_meta=run_meta,
+            save=save,
+        )
+
         last_saved = get_existing_last_date(file_path)
         if last_saved is None:
             start_date = initial_start_date()
             mode = "INIT"
         else:
-            start_date = next_day(last_saved)
-            mode = "INCR"
+            last_price_status = get_existing_last_price_status(file_path)
 
-    if pd.to_datetime(start_date) > pd.to_datetime(end_date) and not force_full_refresh:
-        print(f"[RAW][SKIP] {code} {name} 이미 최신")
-        return {"status": "skip", "rows": 0, "updated": False}
+            # Skip only when today's bar is already finalized.
+            if last_saved == end_date and last_price_status == "종가":
+                return {
+                    "status": "skip",
+                    "message": "이미 최신(종가)",
+                    "rows": 0,
+                    "updated": False,
+                }
+
+            if pd.to_datetime(last_saved) > pd.to_datetime(end_date):
+                return {
+                    "status": "skip",
+                    "message": "저장 데이터 날짜가 오늘보다 미래",
+                    "rows": 0,
+                    "updated": False,
+                }
+
+            if last_saved == end_date and last_price_status == "장중":
+                # Refetch same-day bar to refresh intraday snapshot.
+                start_date = end_date
+                mode = "INCR"
+            else:
+                start_date = next_day(last_saved)
+                mode = "INCR"
 
     try:
         new_df = fetch_ohlcv_with_retry(code, start_date, end_date, metadata=run_meta)
@@ -478,13 +655,22 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
         if force_full_refresh:
             merged = new_df.copy()
         else:
-            old_df = load_raw_daily(file_path)
+            repaired_df = repair_info.get("data")
+            old_df = (
+                repaired_df
+                if isinstance(repaired_df, pd.DataFrame)
+                else load_raw_daily(file_path)
+            )
             old_has_values = not old_df.dropna(how="all").empty
             new_has_values = not new_df.dropna(how="all").empty
 
             if not new_has_values and old_has_values:
-                print(f"[RAW][{mode}] {code} {name} 신규 데이터 없음")
-                return {"status": "empty", "rows": 0, "updated": False}
+                return {
+                    "status": "empty",
+                    "message": "신규 데이터 없음",
+                    "rows": 0,
+                    "updated": False,
+                }
 
             if old_has_values and new_has_values:
                 merged = pd.concat([old_df, new_df], ignore_index=True)
@@ -502,18 +688,36 @@ def update_one_raw_stock(code: str, name: str) -> Dict:
             )
 
         if merged.empty:
-            print(f"[RAW][{mode}] {code} {name} 저장할 데이터 없음")
-            return {"status": "empty", "rows": 0, "updated": False}
+            return {
+                "status": "empty",
+                "message": "저장할 데이터 없음",
+                "rows": 0,
+                "updated": False,
+            }
 
-        save_raw_daily(file_path, merged)
+        if save:
+            save_raw_daily(file_path, merged)
         added_rows = len(new_df) if not force_full_refresh else len(merged)
 
-        print(f"[RAW][{mode}] {code} {name} 저장 완료 / rows={len(merged)} / added={added_rows}")
-        return {"status": mode.lower(), "rows": int(added_rows), "updated": True}
+        result = {
+            "status": mode.lower(),
+            "message": f"저장 완료 / rows={len(merged)} / added={added_rows}",
+            "rows": int(added_rows),
+            "updated": True,
+        }
+        if not save:
+            result["_pending_file_path"] = file_path
+            result["_pending_data"] = merged
+        return result
 
     except Exception as e:
-        print(f"[RAW][FAIL] {code} {name}: {e}")
-        return {"status": "fail", "rows": 0, "updated": False, "reason": str(e)}
+        return {
+            "status": "fail",
+            "message": f"실패: {e}",
+            "rows": 0,
+            "updated": False,
+            "reason": str(e),
+        }
         
 # =========================================================
 # 파생 데이터(일/주/월)
@@ -673,34 +877,67 @@ def generate_derived_for_one_stock(code: str, name: str) -> Dict:
 # =========================================================
 # 전체 실행
 # =========================================================
-def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
+def market_group(market: str) -> str:
+    m = str(market).upper().strip()
+    if m.startswith("KOSDAQ"):
+        return "KOSDAQ"
+    if m.startswith("ETF"):
+        return "ETF"
+    return "KOSPI"
+
+
+def run_all(
+    force_master_update: bool = False,
+    derive_all: bool = True,
+    markets: Optional[List[str]] = None,
+) -> None:
     """
     derive_all=True:
         raw 업데이트 여부와 상관없이 모든 종목의 derived 재계산
     derive_all=False:
         raw가 변경된 종목만 derived 재계산
+    markets: "KOSPI", "KOSDAQ", "ETF" 중 업데이트할 시장 (None이면 전체)
     """
     ensure_dirs()
 
+    selected = [m.upper() for m in markets] if markets else ["KOSPI", "KOSDAQ", "ETF"]
+
     print("======================================")
-    print("KRX(KOSPI+KOSDAQ) 수집 시작 (FinanceDataReader)")
+    print(f"KRX({'+'.join(selected)}) 수집 시작 (FinanceDataReader)")
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("======================================")
 
     master_df = update_master(force=force_master_update)
+    master_df = master_df[master_df["market"].map(market_group).isin(selected)].reset_index(drop=True)
 
     raw_results = []
     derived_results = []
 
     total = len(master_df)
     updated_codes = set()
+    pending_raw_saves: List[tuple[str, pd.DataFrame]] = []
+
+    def flush_raw_saves() -> None:
+        for file_path, df in pending_raw_saves:
+            save_raw_daily(file_path, df)
+        pending_raw_saves.clear()
 
     for i, row in enumerate(master_df.itertuples(index=False), start=1):
         code = str(row.code).zfill(6)
         name = str(row.name).strip()
 
-        print(f"\n[RAW {i}/{total}] {code} {name}")
-        res = update_one_raw_stock(code, name)
+        res = update_one_raw_stock(code, name, save=False)
+        if res.get("updated"):
+            pending_raw_saves.append(
+                (res["_pending_file_path"], res["_pending_data"])
+            )
+            res.pop("_pending_file_path")
+            res.pop("_pending_data")
+            if len(pending_raw_saves) >= RAW_SAVE_BUFFER_SIZE:
+                flush_raw_saves()
+
+        if i % 50 == 0 or i == total:
+            print(f"[RAW {i}/{total}] 진행중")
         res["code"] = code
         res["name"] = name
         raw_results.append(res)
@@ -710,6 +947,7 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
 
         time.sleep(SLEEP_SEC_BETWEEN_TICKERS)
 
+    flush_raw_saves()
     raw_result_df = pd.DataFrame(raw_results)
 
     for i, row in enumerate(master_df.itertuples(index=False), start=1):
@@ -753,7 +991,10 @@ def run_all(force_master_update: bool = False, derive_all: bool = True) -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
     run_all(
         force_master_update=False,
-        derive_all=True
+        derive_all=True,
+        markets=sys.argv[1:] or None,
     )
