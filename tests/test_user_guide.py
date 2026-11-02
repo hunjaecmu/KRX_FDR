@@ -40,6 +40,13 @@ class UserGuideTests(unittest.TestCase):
     def test_interactive_chart_help_matches_chart_editions(self):
         self.assertEqual(sections()["chart"], ["full", "cloud"])
 
+    def test_dark_theme_applies_only_to_server_edition(self):
+        html = user_guide.render_html("cloud")
+        self.assertIn('body[data-edition="cloud"] {', html)
+        self.assertIn("--bg: #000000", html)
+        self.assertNotIn('body[data-edition="full"]', html)
+        self.assertNotIn('body[data-edition="lite"]', html)
+
     def test_no_token_values_in_guide(self):
         html = user_guide.render_html("full")
         self.assertNotRegex(html, r"github_pat_|ghp_")
