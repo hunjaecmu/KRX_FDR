@@ -67,6 +67,38 @@ section.card { background: var(--card); border: 1px solid var(--line); border-ra
 .down { color: var(--down); font-weight: 600; }
 .empty { display: none; text-align: center; color: var(--muted); padding: 40px; }
 
+/* Server edition: dark theme based on the Revolut design tokens */
+html:has(body[data-edition="cloud"]) { color-scheme: dark; }
+body[data-edition="cloud"] {
+  --bg: #000000; --card: #16181a; --ink: #ffffff; --body: rgba(255, 255, 255, 0.86); --muted: rgba(255, 255, 255, 0.72); --line: rgba(255, 255, 255, 0.12);
+  --chip: rgba(255, 255, 255, 0.08); --accent: #ffffff; --accent-soft: rgba(255, 255, 255, 0.08); --navy: #494fdf; --navy-text: #ffffff;
+  --yellow: #0a0a0a; --yellow-line: rgba(255, 255, 255, 0.12); --yellow-ink: #f2c14e; --pink: #0a0a0a; --pink-line: rgba(226, 59, 74, 0.55); --pink-ink: #ff8a94;
+  --up: #ff6b76; --down: #7aa2ff;
+  letter-spacing: 0.01em;
+}
+body[data-edition="cloud"] h1, body[data-edition="cloud"] h2, body[data-edition="cloud"] h3 { font-weight: 500; letter-spacing: -0.01em; }
+body[data-edition="cloud"] h1 { line-height: 1.2; }
+body[data-edition="cloud"] section.card { border: 0; border-radius: 20px; padding: 32px; }
+body[data-edition="cloud"] .topbar { background: #000000; border-bottom-color: var(--line); height: 64px; }
+body[data-edition="cloud"] .logo { background: #ffffff; color: #000000; border-radius: 9999px; }
+body[data-edition="cloud"] .search { background: #16181a; border-radius: 12px; }
+body[data-edition="cloud"] .search input::placeholder { color: var(--muted); }
+body[data-edition="cloud"] .nav a { border-radius: 9999px; }
+body[data-edition="cloud"] .nav a:hover { background: #16181a; }
+body[data-edition="cloud"] .nav a.active { background: #ffffff; border-color: #ffffff; color: #000000; }
+body[data-edition="cloud"] .nav .num { border-radius: 9999px; }
+body[data-edition="cloud"] .nav a.active .num { background: #000000; color: #ffffff; }
+body[data-edition="cloud"] .badge { background: #494fdf; color: #ffffff; }
+body[data-edition="cloud"] .summary { border-radius: 20px; padding: 24px; }
+body[data-edition="cloud"] .summary .tag { color: #ffffff; }
+body[data-edition="cloud"] .summary-grid div { background: rgba(0, 0, 0, 0.22); border-color: rgba(255, 255, 255, 0.22); border-radius: 12px; }
+body[data-edition="cloud"] .note, body[data-edition="cloud"] .warn { border-radius: 12px; }
+body[data-edition="cloud"] th { background: transparent; }
+body[data-edition="cloud"] code { background: rgba(255, 255, 255, 0.1); color: #ffffff; }
+body[data-edition="cloud"] a { color: #ffffff; }
+body[data-edition="cloud"] mark { background: #494fdf; color: #ffffff; }
+body[data-edition="cloud"] .chips span { border-radius: 9999px; }
+
 [data-editions]:not(.visible-edition) { display: none !important; }
 section.card.search-hidden, .nav a.search-hidden { display: none !important; }
 mark { background: #ffe9a8; color: inherit; border-radius: 3px; }

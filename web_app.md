@@ -186,6 +186,7 @@ streamlit-image-select가 없으면:
 
 - [webapp/user_guide.html](webapp/user_guide.html)을 화면에 표시합니다.
 - 버전에 맞는 내용만 보여 줍니다. 서버 버전에는 저장, 운영, 배포 안내가 나오지 않습니다.
+- 서버 버전은 Revolut 디자인 값을 참고한 어두운 테마, 메인과 경량 버전은 밝은 테마입니다.
 - 메뉴나 동작을 바꾸면 이 파일도 함께 고칩니다.
 
 ## 6. 상태 관리
