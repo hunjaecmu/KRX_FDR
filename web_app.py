@@ -1565,7 +1565,6 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_output_holdings_data() -> None:
-    st.caption(f"{HOLDINGS_CSV} 데이터를 조회합니다.")
     holdings_path = HOLDINGS_CSV
     os.makedirs(os.path.dirname(holdings_path), exist_ok=True)
     master = get_master_table()
@@ -2682,6 +2681,18 @@ def _resolve_menu_from_query() -> str:
         return raw_text
     return START_MENU
 
+def _format_scan_label(label: str) -> str:
+    m = re.fullmatch(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})\d{2}", str(label))
+    return f"{m[1]}-{m[2]}-{m[3]} {m[4]}:{m[5]}" if m else str(label)
+
+
+MENU_GROUPS = [
+    (None, [START_MENU]),
+    ("시세·스캔", ["1. 데이터 저장", "2. 이평 돌파 종목 서칭", "3. 서칭 데이터 조회"]),
+    ("관심·패턴", ["4. 관심종목 서칭", "5. 관심종목 조회", "6. 패턴 데이터 입력", "7. 패턴 데이터 조회"]),
+    ("보유", ["8. 보유 종목 조회"]),
+]
+
 FEATURE_HELP = {
     "1. 데이터 저장": "KRX 일봉/주봉/월봉 데이터 적재와 갱신을 실행합니다.",
     "2. 이평 돌파 종목 서칭": "주/월봉 이평선 돌파 종목을 스캔합니다.",
@@ -2693,254 +2704,8 @@ FEATURE_HELP = {
     "8. 보유 종목 조회": "보유 종목 데이터를 조회합니다.",
 }
 
-st.markdown(
-    """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=Montserrat:wght@600;700;800&display=swap');
-
-:root {
-  --bg-main: #f3f6fb;
-  --panel: #ffffff;
-  --panel-2: #f8fbff;
-  --ink: #1b2536;
-  --muted: #5d6a7f;
-  --line: #dbe3ef;
-  --accent: #0a7a6c;
-  --accent-soft: #dff6f1;
-}
-
-.stApp {
-  background:
-    radial-gradient(80rem 50rem at 120% -10%, #dce8ff 0%, rgba(220, 232, 255, 0) 45%),
-    radial-gradient(70rem 40rem at -15% 0%, #eafdf8 0%, rgba(234, 253, 248, 0) 40%),
-    var(--bg-main);
-  color: var(--ink);
-  font-family: 'IBM Plex Sans KR', sans-serif;
-}
-
-h1, h2, h3 {
-  font-family: 'Montserrat', 'IBM Plex Sans KR', sans-serif;
-  letter-spacing: 0.01em;
-}
-
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #112339 0%, #172f49 55%, #18354f 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-section[data-testid="stSidebar"] {
-    width: 14rem !important;
-    min-width: 14rem !important;
-    max-width: 14rem !important;
-    flex: 0 0 14rem !important;
-}
-
-section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] > div {
-    width: 14rem !important;
-    min-width: 14rem !important;
-    max-width: 14rem !important;
-}
-
-section[data-testid="stSidebar"][aria-expanded="false"] {
-    margin-left: -14rem !important;
-}
-
-[data-testid="stSidebarResizeHandle"],
-[data-testid="stSidebarResizer"],
-[aria-label="Resize sidebar"],
-section[data-testid="stSidebar"] + div [role="separator"],
-[role="separator"][aria-orientation="vertical"] {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    pointer-events: none !important;
-}
-
-[data-testid="stSidebar"] * {
-  color: #e9f0fb;
-}
-
-[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] button[kind="secondary"] {
-    background: rgba(233, 240, 251, 0.12) !important;
-    color: #e9f0fb !important;
-    border: 1px solid rgba(190, 210, 235, 0.45) !important;
-    font-weight: 700;
-    font-size: 0.9rem;
-}
-
-[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] button[kind="secondary"] * {
-    color: #e9f0fb !important;
-    fill: #e9f0fb !important;
-}
-
-[data-testid="stSidebar"] .stButton > button:hover,
-[data-testid="stSidebar"] button[kind="secondary"]:hover {
-    background: rgba(233, 240, 251, 0.24) !important;
-    color: #ffffff !important;
-    border-color: rgba(200, 220, 245, 0.7) !important;
-}
-
-[data-testid="stSidebar"] .stButton > button:hover *,
-[data-testid="stSidebar"] button[kind="secondary"]:hover * {
-    color: #ffffff !important;
-    fill: #ffffff !important;
-}
-
-[data-testid="stSidebar"] button[kind="primary"] {
-    background: #23b59d !important;
-    color: #082b2d !important;
-    border: 1px solid #6de5d1 !important;
-    font-weight: 800;
-    box-shadow: 0 0 0 2px rgba(109, 229, 209, 0.2) !important;
-}
-
-[data-testid="stSidebar"] button[kind="primary"] * {
-    color: #082b2d !important;
-    fill: #082b2d !important;
-}
-
-[data-testid="stSidebar"] .stButton > button:focus,
-[data-testid="stSidebar"] .stButton > button:focus-visible,
-[data-testid="stSidebar"] button[kind="secondary"]:focus,
-[data-testid="stSidebar"] button[kind="secondary"]:focus-visible,
-[data-testid="stSidebar"] button[kind="primary"]:focus,
-[data-testid="stSidebar"] button[kind="primary"]:focus-visible {
-    color: #ffffff !important;
-    border-color: #7aa6d9 !important;
-    box-shadow: 0 0 0 2px rgba(122, 166, 217, 0.35) !important;
-}
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 1rem 1.1rem;
-  box-shadow: 0 10px 24px rgba(18, 39, 66, 0.06);
-}
-
-.status-card {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 0.85rem 0.9rem;
-}
-
-.data-card {
-    padding: 1.15rem 1.2rem;
-    min-height: 110px;
-}
-
-.status-title {
-  font-size: 0.78rem;
-  color: var(--muted);
-  margin-bottom: 0.25rem;
-}
-
-.status-value {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.data-card .status-title {
-    font-size: 0.9rem;
-}
-
-.data-card .status-value {
-    font-size: 1.5rem;
-    margin-top: 0.35rem;
-}
-
-.flow-chip {
-  display: inline-block;
-  background: var(--accent-soft);
-  color: var(--accent);
-  border: 1px solid #bdece1;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  padding: 0.2rem 0.6rem;
-  margin-right: 0.35rem;
-  margin-bottom: 0.4rem;
-}
-
-.caption {
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.log-box {
-    height: 420px;
-    overflow-y: auto;
-    border: 1px solid var(--line);
-    background: #0f1725;
-    color: #d7e4ff;
-    border-radius: 10px;
-    padding: 10px 12px;
-}
-
-.log-box .log-content {
-    width: 100%;
-    writing-mode: horizontal-tb;
-    text-orientation: mixed;
-    direction: ltr;
-    unicode-bidi: plaintext;
-    color: #d7e4ff;
-    white-space: normal;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 0.85rem;
-    line-height: 1.35;
-}
-
-.live-log-box {
-    overflow-y: hidden;
-}
-
-.overview-table-wrap {
-    width: 100%;
-    overflow-x: auto;
-}
-
-.overview-table {
-    width: 100%;
-    border-collapse: collapse;
-    border: none;
-    table-layout: fixed;
-}
-
-.overview-table th,
-.overview-table td {
-    border: none !important;
-    text-align: center;
-    vertical-align: middle;
-    padding: 8px 10px;
-    font-size: 0.92rem;
-}
-
-.overview-table th {
-    font-weight: 700;
-    color: var(--ink);
-}
-
-.overview-table td {
-    color: var(--muted);
-}
-
-.case-grid-title {
-    text-align: center;
-    font-weight: 700;
-    color: var(--ink);
-    margin-bottom: 0.35rem;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+with open(os.path.join(os.path.dirname(storage.__file__), "theme.css"), encoding="utf-8") as _theme_file:
+    st.markdown(f"<style>{_theme_file.read()}</style>", unsafe_allow_html=True)
 
 
 if "show_intro" not in st.session_state:
@@ -2980,154 +2745,100 @@ if "data_store_progress_value" not in st.session_state:
 if "data_store_progress_text" not in st.session_state:
     st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
 
-st.sidebar.title("KRX FDR")
-for menu in MENU_ITEMS:
-    button_type = "primary" if st.session_state.selected_menu == menu else "secondary"
-    if st.sidebar.button(menu, key=f"menu_btn_{menu}", width="stretch", type=button_type):
-        st.session_state.selected_menu = menu
-        st.query_params["menu"] = str(MENU_ITEMS.index(menu))
-        st.rerun()
+st.sidebar.markdown("### KRX FDR")
+for group_title, group_menus in MENU_GROUPS:
+    if group_title:
+        st.sidebar.markdown(f"<div class='menu-group'>{group_title}</div>", unsafe_allow_html=True)
+    for menu in group_menus:
+        button_type = "primary" if st.session_state.selected_menu == menu else "secondary"
+        if st.sidebar.button(menu, key=f"menu_btn_{menu}", width="stretch", type=button_type):
+            st.session_state.selected_menu = menu
+            st.query_params["menu"] = str(MENU_ITEMS.index(menu))
+            st.rerun()
 
 selected_menu = st.session_state.selected_menu
 if selected_menu in MENU_ITEMS:
     st.query_params["menu"] = str(MENU_ITEMS.index(selected_menu))
 st.session_state.show_intro = selected_menu == START_MENU
 
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    "<div class='caption'>4~8번 메뉴에서 관심/기록/보유 종목 조회 기능을 사용할 수 있습니다.</div>",
-    unsafe_allow_html=True,
-)
-
-st.title("KRX FDR 웹 대시보드")
-
 data_status = get_data_status(DATA_DIR)
 scan_status = get_scan_status(OUTPUT_DIR)
 
 if st.session_state.show_intro:
-    top_left = st.container()
-    top_right = None
-else:
-    top_left, top_right = st.columns([1.4, 1.1], gap="large")
-
-with top_left:
-    st.markdown("<div class='panel'>", unsafe_allow_html=True)
-    if st.session_state.show_intro:
-        st.markdown(
-            """
+    st.title("KRX FDR")
+    st.markdown(
+        """
 <span class='flow-chip'>데이터 저장</span>
 <span class='flow-chip'>돌파 서칭</span>
 <span class='flow-chip'>결과 조회</span>
 <span class='flow-chip'>종목별 분석</span>
 """,
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            """
-1. 데이터 저장으로 최신 시세를 적재합니다.  
-2. 이평 돌파 종목 서칭을 실행합니다.  
-3. 서칭 데이터 조회에서 케이스별 결과를 검토합니다.  
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+1. 데이터 저장으로 최신 시세를 적재합니다.
+2. 이평 돌파 종목 서칭을 실행합니다.
+3. 서칭 데이터 조회에서 케이스별 결과를 검토합니다.
 4. 관심/기록/보유 종목 메뉴에서 데이터를 조회하고 저장합니다.
 """
-        )
-        st.markdown("#### 데이터 현황")
-        d1, d2 = st.columns(2, gap="large")
-        with d1:
+    )
+    st.markdown("#### 데이터 현황")
+    intro_cards = [
+        ("KOSPI 종목 수", f"{data_status['kospi_count']:,}"),
+        ("KOSDAQ 종목 수", f"{data_status['kosdaq_count']:,}"),
+        ("최신 데이터 일자", data_status["latest_trade_date"] or "-"),
+        ("최신 수집 날짜", data_status["latest_collection_date"] or "-"),
+    ]
+    for card_col, (card_title, card_value) in zip(st.columns(4), intro_cards):
+        with card_col:
             st.markdown(
-                f"<div class='status-card data-card'><div class='status-title'>KOSPI 종목 수</div><div class='status-value'>{data_status['kospi_count']:,}</div></div>",
+                f"<div class='status-card data-card'><div class='status-title'>{card_title}</div>"
+                f"<div class='status-value'>{card_value}</div></div>",
                 unsafe_allow_html=True,
             )
-        with d2:
-            st.markdown(
-                f"<div class='status-card data-card'><div class='status-title'>KOSDAQ 종목 수</div><div class='status-value'>{data_status['kosdaq_count']:,}</div></div>",
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-
-        d3, d4 = st.columns(2, gap="large")
-        with d3:
-            st.markdown(
-                f"<div class='status-card data-card'><div class='status-title'>최신 데이터 일자</div><div class='status-value'>{data_status['latest_trade_date'] or '-'}</div></div>",
-                unsafe_allow_html=True,
-            )
-        with d4:
-            st.markdown(
-                f"<div class='status-card data-card'><div class='status-title'>최신 수집 날짜</div><div class='status-value'>{data_status['latest_collection_date'] or '-'}</div></div>",
-                unsafe_allow_html=True,
-            )
-    else:
+else:
+    head_left, head_right = st.columns([1, 1.4])
+    with head_left:
         st.subheader(selected_menu)
-        st.write(FEATURE_HELP[selected_menu])
-        if selected_menu == "1. 데이터 저장":
-            latest_date = data_status.get("latest_trade_date")
-            today_text = date.today().strftime("%Y-%m-%d")
-            if latest_date:
-                if str(latest_date) < today_text:
-                    st.warning(
-                        f"최신 데이터 일자({latest_date})가 오늘({today_text})보다 이전입니다. 지금 업데이트 버튼 실행이 필요합니다."
-                    )
-                elif str(latest_date) == today_text:
-                    st.success(
-                        f"최신 데이터 일자({latest_date})가 오늘({today_text})과 같습니다. 필요 시 수동 업데이트를 실행할 수 있습니다."
-                    )
-                else:
-                    st.info(
-                        f"최신 데이터 일자({latest_date})가 오늘({today_text})보다 이후로 기록되어 있습니다."
-                    )
+    with head_right:
+        st.markdown(
+            "<div class='status-strip'>"
+            f"<span>데이터 <b>{data_status['latest_collection_date'] or '미확인'}</b></span>"
+            f"<span>파일 <b>{data_status['daily_file_count']:,}개</b></span>"
+            f"<span>스캔 <b>{_format_scan_label(scan_status['latest_scan_label'])}</b></span>"
+            f"<span>돌파 <b>{scan_status['total_breakouts']:,}건</b></span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    st.caption(FEATURE_HELP[selected_menu])
+    if selected_menu == "1. 데이터 저장":
+        latest_date = data_status.get("latest_trade_date")
+        today_text = date.today().strftime("%Y-%m-%d")
+        if latest_date:
+            if str(latest_date) < today_text:
+                st.warning(
+                    f"최신 데이터 일자({latest_date})가 오늘({today_text})보다 이전입니다. 지금 업데이트 버튼 실행이 필요합니다."
+                )
+            elif str(latest_date) == today_text:
+                st.success(
+                    f"최신 데이터 일자({latest_date})가 오늘({today_text})과 같습니다. 필요 시 수동 업데이트를 실행할 수 있습니다."
+                )
             else:
-                st.warning("최신 데이터 일자를 찾을 수 없습니다. 지금 업데이트 버튼 실행이 필요합니다.")
-        if selected_menu == "2. 이평 돌파 종목 서칭":
-            latest_scan = scan_status.get("latest_scan_label", "")
-            today_prefix = date.today().strftime("%Y%m%d")
-            if isinstance(latest_scan, str) and latest_scan.startswith(today_prefix):
-                st.success("스캔이 완료되었습니다.")
-            elif latest_scan and latest_scan != "미실행":
-                st.warning("오늘자 스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
-            else:
-                st.warning("스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
-        if selected_menu == "5. 관심종목 조회":
-            st.info("tracking 폴더의 월별 관심 종목 데이터(예: watch_202604.csv)를 조회합니다.")
-        if selected_menu == "6. 패턴 데이터 입력":
-            st.info("4번과 동일 조회 화면에서 기록 데이터 저장을 지원합니다.")
-        if selected_menu == "7. 패턴 데이터 조회":
-            st.info("tracking 폴더의 기록 CSV 데이터를 조회합니다.")
-        if selected_menu == "8. 보유 종목 조회":
-            st.info("보유 종목 데이터를 조회합니다.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-if top_right is not None:
-    with top_right:
-        st.markdown("<div class='panel'>", unsafe_allow_html=True)
-        st.subheader("전체 현황")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(
-                "<div class='status-card'><div class='status-title'>데이터 최신화</div><div class='status-value'>{}</div></div>".format(
-                    data_status["latest_collection_date"] or "미확인"
-                ),
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                "<div class='status-card'><div class='status-title'>수집 종목 파일</div><div class='status-value'>{:,}개</div></div>".format(
-                    data_status["daily_file_count"]
-                ),
-                unsafe_allow_html=True,
-            )
-        with c2:
-            st.markdown(
-                "<div class='status-card'><div class='status-title'>최근 스캔</div><div class='status-value'>{}</div></div>".format(
-                    scan_status["latest_scan_label"]
-                ),
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                "<div class='status-card'><div class='status-title'>총 돌파 건수</div><div class='status-value'>{:,}건</div></div>".format(
-                    scan_status["total_breakouts"]
-                ),
-                unsafe_allow_html=True,
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+                st.info(
+                    f"최신 데이터 일자({latest_date})가 오늘({today_text})보다 이후로 기록되어 있습니다."
+                )
+        else:
+            st.warning("최신 데이터 일자를 찾을 수 없습니다. 지금 업데이트 버튼 실행이 필요합니다.")
+    if selected_menu == "2. 이평 돌파 종목 서칭":
+        latest_scan = scan_status.get("latest_scan_label", "")
+        today_prefix = date.today().strftime("%Y%m%d")
+        if isinstance(latest_scan, str) and latest_scan.startswith(today_prefix):
+            st.success("스캔이 완료되었습니다.")
+        elif latest_scan and latest_scan != "미실행":
+            st.warning("오늘자 스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
+        else:
+            st.warning("스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
 
 if st.session_state.show_intro and scan_status["case_counts"]:
     st.markdown("### 케이스별 돌파 건수")
@@ -3135,7 +2846,6 @@ if st.session_state.show_intro and scan_status["case_counts"]:
     st.dataframe(case_df, width="stretch", hide_index=True)
 
 if not st.session_state.show_intro:
-    st.markdown("<div class='panel'>", unsafe_allow_html=True)
     if selected_menu == "1. 데이터 저장":
         st.caption("`data_store.py` 실행 로그를 아래에서 확인합니다.")
         run_status_box = st.empty()
@@ -3329,7 +3039,6 @@ if not st.session_state.show_intro:
 
             render_log_box(st.session_state.scan_market_logs)
     elif selected_menu == "3. 서칭 데이터 조회":
-        st.caption("최신 스캔 결과를 웹 앱 내에서 직접 조회합니다.")
         review_data = load_scan_review_data(scan_status["latest_scan_dir"])
         cases = review_data.get("cases", {})
 
@@ -3368,6 +3077,7 @@ if not st.session_state.show_intro:
             filter_desc_volume = "필터 없음" if max_volume_pct is None else f"<= {max_volume_pct:.1f}%"
 
             overview_rows = []
+            filtered_counts = {}
             total_all = 0
             total_filtered = 0
             ordered_case_keys = []
@@ -3395,6 +3105,7 @@ if not st.session_state.show_intro:
 
                 total_all += len(items)
                 total_filtered += len(filtered)
+                filtered_counts[case_key] = len(filtered)
                 overview_rows.append(
                     {
                         "구분": REVIEW_CASE_LABELS.get(case_key, payload.get("label", case_key)),
@@ -3403,34 +3114,33 @@ if not st.session_state.show_intro:
                     }
                 )
 
-            st.markdown("#### Overview Table")
-            st.caption(f"적용 필터: 돌파율 {filter_desc_breakout}, 볼륨% {filter_desc_volume}")
+            with st.expander(f"케이스별 요약 (전체 {total_all:,}건, 필터 적용 {total_filtered:,}건)"):
+                st.caption(f"적용 필터: 돌파율 {filter_desc_breakout}, 볼륨% {filter_desc_volume}")
 
-            table_rows_html = "".join(
-                [
-                    "<tr>"
-                    f"<td>{html.escape(str(r.get('구분', '')))}</td>"
-                    f"<td>{int(r.get('전체 돌파 종목수', 0)):,}</td>"
-                    f"<td>{int(r.get('필터 적용 종목수', 0)):,}</td>"
-                    "</tr>"
-                    for r in overview_rows
-                ]
-            )
-            st.markdown(
-                (
-                    "<div class='overview-table-wrap'>"
-                    "<table class='overview-table'>"
-                    "<thead><tr><th>구분</th><th>전체 돌파 종목수</th><th>필터 적용 종목수</th></tr></thead>"
-                    f"<tbody>{table_rows_html}</tbody>"
-                    "</table></div>"
-                ),
-                unsafe_allow_html=True,
-            )
-            s1, s2 = st.columns(2)
-            s1.metric("전체 합계", f"{total_all:,}")
-            s2.metric("필터 적용 합계", f"{total_filtered:,}")
+                table_rows_html = "".join(
+                    [
+                        "<tr>"
+                        f"<td>{html.escape(str(r.get('구분', '')))}</td>"
+                        f"<td>{int(r.get('전체 돌파 종목수', 0)):,}</td>"
+                        f"<td>{int(r.get('필터 적용 종목수', 0)):,}</td>"
+                        "</tr>"
+                        for r in overview_rows
+                    ]
+                )
+                st.markdown(
+                    (
+                        "<div class='overview-table-wrap'>"
+                        "<table class='overview-table'>"
+                        "<thead><tr><th>구분</th><th>전체 돌파 종목수</th><th>필터 적용 종목수</th></tr></thead>"
+                        f"<tbody>{table_rows_html}</tbody>"
+                        "</table></div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                s1, s2 = st.columns(2)
+                s1.metric("전체 합계", f"{total_all:,}")
+                s2.metric("필터 적용 합계", f"{total_filtered:,}")
 
-            st.markdown("#### 케이스 선택")
             if "review_selected_case" not in st.session_state:
                 st.session_state.review_selected_case = "weekly_ma10_breakout"
 
@@ -3447,7 +3157,7 @@ if not st.session_state.show_intro:
                 with col:
                     st.markdown(f"<div class='case-grid-title'>{title}</div>", unsafe_allow_html=True)
                     for key in keys:
-                        label = REVIEW_CASE_LABELS.get(key, key)
+                        label = f"{REVIEW_CASE_LABELS.get(key, key)} ({filtered_counts.get(key, 0):,})"
                         btn_type = "primary" if st.session_state.review_selected_case == key else "secondary"
                         st.button(
                             label,
@@ -3486,4 +3196,3 @@ if not st.session_state.show_intro:
         st.caption("하단의 넓은 영역은 실제 종목/스캔 결과 차트가 표시될 자리입니다.")
         chart_df = build_mock_chart_data()
         st.line_chart(chart_df, width="stretch", height=470)
-    st.markdown("</div>", unsafe_allow_html=True)

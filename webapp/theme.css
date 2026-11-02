@@ -1,0 +1,180 @@
+:root {
+  --ink: #18181b;
+  --muted: #71717a;
+  --line: #e4e4e7;
+  --surface: #fafafa;
+  --selected: #e4e4e7;
+}
+
+/* Layout */
+[data-testid="stMainBlockContainer"] {
+  padding-top: 2.5rem;
+  padding-bottom: 3rem;
+}
+
+section[data-testid="stSidebar"] {
+  width: 14rem !important;
+  min-width: 14rem !important;
+  max-width: 14rem !important;
+}
+
+section[data-testid="stSidebar"][aria-expanded="false"] {
+  margin-left: -14rem !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  gap: 0.15rem;
+}
+
+/* Sidebar menu */
+[data-testid="stSidebar"] .stButton > button {
+  justify-content: flex-start;
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+[data-testid="stSidebar"] .stButton > button > div {
+  justify-content: flex-start;
+}
+
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: #f4f4f5;
+  color: var(--ink);
+}
+
+[data-testid="stSidebar"] .stButton > button[kind="primary"],
+[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+[data-testid="stSidebar"] .stButton > button[kind="primary"] p {
+  font-weight: 600;
+}
+
+.menu-group {
+  margin: 0.9rem 0 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Header status */
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem 1rem;
+  padding-top: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.status-strip b {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* Cards */
+.status-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.data-card {
+  min-height: 5.5rem;
+}
+
+.status-title {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.status-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.data-card .status-value {
+  font-size: 1.3rem;
+  margin: 0.2rem 0;
+}
+
+.flow-chip {
+  display: inline-block;
+  background: #f4f4f5;
+  color: #3f3f46;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.6rem;
+  margin: 0 0.35rem 0.4rem 0;
+}
+
+/* Logs */
+.log-box {
+  height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  background: #18181b;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.log-box .log-content {
+  width: 100%;
+  color: #e4e4e7;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.live-log-box {
+  overflow-y: hidden;
+}
+
+/* Menu 3 */
+.overview-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.overview-table th,
+.overview-table td {
+  border: none !important;
+  border-bottom: 1px solid var(--line) !important;
+  text-align: center;
+  padding: 7px 10px;
+  font-size: 0.875rem;
+}
+
+.overview-table th {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.overview-table td {
+  color: var(--ink);
+}
+
+.case-grid-title {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}

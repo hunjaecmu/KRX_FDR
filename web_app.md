@@ -31,6 +31,11 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 
 메뉴 상태는 query parameter menu와 session state를 함께 사용하여 유지합니다.
 
+## 2-1. 화면 테마
+
+- 색상, 글꼴, 모서리: `.streamlit/config.toml` (프로젝트 폴더에서 `streamlit run`을 실행해야 적용)
+- 테마 설정으로 지정할 수 없는 사이드바 메뉴, 카드 등의 스타일: `webapp/theme.css`
+
 ## 3. 의존 모듈
 
 주요 의존성:

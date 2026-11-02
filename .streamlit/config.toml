@@ -1,0 +1,24 @@
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#18181b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f5"
+textColor = "#18181b"
+borderColor = "#e4e4e7"
+dataframeBorderColor = "#e4e4e7"
+dataframeHeaderBackgroundColor = "#fafafa"
+linkColor = "#2563eb"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "8px"
+baseFontSize = 15
+font = "IBM Plex Sans KR:https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap"
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+headingFontSizes = ["1.6rem", "1.3rem", "1.1rem", "1rem", "0.95rem", "0.9rem"]
+
+[theme.sidebar]
+backgroundColor = "#fafafa"
+secondaryBackgroundColor = "#f4f4f5"
