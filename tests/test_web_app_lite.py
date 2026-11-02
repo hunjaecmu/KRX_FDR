@@ -75,6 +75,22 @@ class LiteEditionTests(unittest.TestCase):
         self.assertIn("52봉", text)
         self.assertTrue(any("실시간 시세가 아니며" in c.value for c in at.caption))
 
+    def test_start_screen_has_open_source_notice(self):
+        at = self.run_app("0")
+        self.assertEqual(at.expander[-1].label, "오픈소스 및 면책 고지")
+        text = " ".join(m.value for m in at.expander[-1].markdown)
+        self.assertIn("Streamlit", text)
+        self.assertIn("Pretendard", text)
+        self.assertIn("투자 권유가 아닙니다", text)
+
+    def test_notice_lists_every_pinned_package(self):
+        with open(os.path.join(ROOT, "lite", "requirements.txt"), encoding="utf-8") as f:
+            pinned = [line.strip().split("==") for line in f if line.strip()]
+        with open(os.path.join(ROOT, "THIRD_PARTY_NOTICES.md"), encoding="utf-8") as f:
+            notice = f.read()
+        for package, version in pinned:
+            self.assertIn(f"| {version} |", notice, package)
+
     def test_removed_menu_address_falls_back_to_start(self):
         at = self.run_app("8")
         self.assertEqual(at.session_state["selected_menu"], "시작화면")

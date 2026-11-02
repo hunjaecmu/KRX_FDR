@@ -2856,6 +2856,13 @@ def _sync_cloud_data() -> None:
         st.stop()
 
 
+def _render_open_source_notice() -> None:
+    notice_path = os.path.join(os.path.dirname(os.path.dirname(storage.__file__)), "THIRD_PARTY_NOTICES.md")
+    with st.expander("오픈소스 및 면책 고지"):
+        with open(notice_path, encoding="utf-8") as notice_file:
+            st.markdown(notice_file.read())
+
+
 def _render_data_guide() -> None:
     st.caption("KOSPI, KOSDAQ, 한국 ETF의 시세를 이동평균 기준으로 살펴보는 조회 전용 화면입니다.")
     review_col, chart_col = st.columns(2)
@@ -3002,6 +3009,8 @@ if st.session_state.show_intro:
             st.markdown("#### 케이스별 돌파 건수")
             case_df = pd.DataFrame(scan_status["case_counts"])
             st.dataframe(case_df, width="stretch", hide_index=True)
+    if LITE_EDITION:
+        _render_open_source_notice()
 
 if not st.session_state.show_intro:
     if selected_menu == "1. 데이터 저장":
