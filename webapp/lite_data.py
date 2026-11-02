@@ -59,6 +59,16 @@ def available_indices() -> list[str]:
     ]
 
 
+def load_index_summaries(data_dir: str) -> list[dict]:
+    summaries = []
+    for code, _ in INDEX_TICKERS:
+        path = os.path.join(data_dir, "index", f"{code}_summary.json")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                summaries.append(json.load(f))
+    return summaries
+
+
 def write_prices_parquet(data_dir: str, master: pd.DataFrame, target_path: str) -> int:
     frames = []
     for code in master["code"]:
@@ -72,10 +82,14 @@ def write_prices_parquet(data_dir: str, master: pd.DataFrame, target_path: str) 
             frames.append(frame)
 
     for code in available_indices():
-        frame = pd.read_csv(data_loader._find_file(data_loader.INDEX_WEEKLY_DIR, code))
-        frame["code"] = code
-        frame["timeframe"] = "weekly"
-        frames.append(frame)
+        for timeframe, folder in (("weekly", data_loader.INDEX_WEEKLY_DIR), ("monthly", data_loader.INDEX_MONTHLY_DIR)):
+            file_path = data_loader._find_file(folder, code)
+            if file_path is None:
+                continue
+            frame = pd.read_csv(file_path)
+            frame["code"] = code
+            frame["timeframe"] = timeframe
+            frames.append(frame)
 
     prices = pd.concat(frames, ignore_index=True)
     prices["is_final"] = prices["is_final"].astype(str).str.lower()
@@ -104,6 +118,7 @@ def build_bundle(data_dir: str, output_dir: str, data_status: dict, target_path:
         "built_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "scan": os.path.basename(scan_dir),
         "indices": available_indices(),
+        "index_summaries": load_index_summaries(data_dir),
         "data_status": data_status,
     }
     with tempfile.TemporaryDirectory() as temp_dir:

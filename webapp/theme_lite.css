@@ -18,6 +18,15 @@
   border-color: var(--line);
 }
 
+/* Index change: red up, blue down */
+.index-up {
+  color: #f85149;
+}
+
+.index-down {
+  color: #58a6ff;
+}
+
 /* Primary buttons need dark text on amber */
 [data-testid="stMain"] button[kind="primary"],
 [data-testid="stMain"] button[kind="primary"] p {

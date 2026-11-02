@@ -84,8 +84,8 @@
 | 묶음 내 경로 | 내용 |
 |---|---|
 | `data/master/kospi_tickers.csv` | 종목 마스터 |
-| `data/lite/prices.parquet` | 마스터 종목의 주봉·월봉 (약 214만 행), KOSPI·KOSDAQ 지수 주봉 |
-| `data/lite/manifest.json` | 생성 시각, 스캔 이름, 데이터 현황 |
+| `data/lite/prices.parquet` | 마스터 종목과 KOSPI·KOSDAQ 지수의 주봉·월봉 (약 214만 행) |
+| `data/lite/manifest.json` | 생성 시각, 스캔 이름, 데이터 현황, 지수의 당일 종가와 등락률 |
 | `output/scan_result_*/` | 최신 스캔 결과와 차트 PNG |
 
 **포함하지 않는 것:** 일봉, 원시 시세, 로그, `tracking/`의 보유·관심·패턴 기록.
