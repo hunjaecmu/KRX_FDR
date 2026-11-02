@@ -40,7 +40,8 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
 - `START_YEARS_AGO = 25`
 - `MA_WINDOWS = [5, 10, 20, 120, 240]`
 - `MAX_RETRY = 3`
-- `SLEEP_SEC_BETWEEN_TICKERS = 0.12`
+- `SLEEP_SEC_BETWEEN_TICKERS = 0.03`
+- `DERIVED_MAX_WORKERS = 4`
 - `SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02`
 - 장마감 기준:
   - `MARKET_CLOSE_HOUR = 15`
@@ -95,8 +96,11 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
 1. 디렉터리 생성 (`ensure_dirs`)
 2. 마스터 갱신 (`update_master`): KOSPI, KOSDAQ, 한국 ETF 종목 목록 병합
 3. 마스터에 포함된 모든 종목 raw 업데이트 (`update_one_raw_stock`)
-4. 전체(또는 업데이트 종목만) derived 생성 (`generate_derived_for_one_stock`)
+4. 전체(또는 업데이트 종목만) derived를 멀티프로세싱으로 생성 (`generate_derived_all`)
+   - process pool이 중단되면 남은 종목을 순차 처리
 5. 로그 CSV 저장
+   - `logs/update_timing.csv`에 실행별 단계 시간을 누적 (`raw_sec`, `fetch_sec`, `derived_sec`)
+   - `fetch_sec`는 원시 조회 시간 합계이며 장중 보정 재조회는 포함하지 않음
 
 ## 6. 함수 개요
 
