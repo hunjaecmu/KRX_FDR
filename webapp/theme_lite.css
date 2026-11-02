@@ -1,0 +1,104 @@
+/* Terminal colors for the lite edition. Positions and spacing come from theme.css. */
+:root {
+  --ink: #e6edf3;
+  --muted: #8b949e;
+  --line: #30363d;
+  --accent: #d29922;
+  --accent-soft: #2d2206;
+}
+
+/* Sidebar menu */
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: #161b22;
+}
+
+[data-testid="stSidebar"] .stButton > button[kind="primary"],
+[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+  background: #21262d;
+  border-color: var(--line);
+}
+
+/* Primary buttons need dark text on amber */
+[data-testid="stMain"] button[kind="primary"],
+[data-testid="stMain"] button[kind="primary"] p {
+  color: #0d1117;
+}
+
+/* Numbers */
+.status-value,
+.chip b,
+.gallery-head > span:first-child,
+.overview-table td {
+  font-family: Consolas, "Courier New", monospace;
+}
+
+/* Cards */
+.status-card,
+.chip {
+  background: #161b22;
+}
+
+.chip-final {
+  background: var(--accent-soft);
+  border-color: #6e5312;
+  color: var(--accent);
+}
+
+.chip-open {
+  background: #21262d;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+/* Start screen progress */
+.flow-panel {
+  background: #161b22;
+  border: 1px solid var(--line);
+}
+
+.flow-head {
+  color: var(--muted);
+}
+
+.flow-head b,
+.flow-title {
+  color: var(--ink);
+}
+
+a.flow-step,
+a.flow-step:hover {
+  border-color: var(--line);
+}
+
+a.flow-step:hover {
+  border-color: var(--muted);
+}
+
+.flow-mark {
+  background: #21262d;
+  color: var(--muted);
+}
+
+.flow-detail,
+.flow-waiting .flow-title {
+  color: var(--muted);
+}
+
+.flow-done .flow-mark {
+  background: var(--accent);
+  color: #0d1117;
+}
+
+.flow-todo {
+  border-color: var(--accent) !important;
+}
+
+/* Logs */
+.log-box {
+  background: #010409;
+}
+
+/* Saved charts have a white background; invert them and keep their hues. */
+[data-testid="stImage"] img {
+  filter: invert(0.92) hue-rotate(180deg);
+}

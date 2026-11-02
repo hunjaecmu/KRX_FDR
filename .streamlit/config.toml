@@ -1,0 +1,24 @@
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#1b3fcc"
+backgroundColor = "#f5f4ef"
+secondaryBackgroundColor = "#eeece5"
+textColor = "#14213d"
+borderColor = "#dddbd2"
+dataframeBorderColor = "#dddbd2"
+dataframeHeaderBackgroundColor = "#f5f4ef"
+linkColor = "#1b3fcc"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "10px"
+baseFontSize = 15
+font = "Pretendard Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+headingFontWeights = [700, 700, 600, 600, 600, 600]
+headingFontSizes = ["1.6rem", "1.3rem", "1.1rem", "1rem", "0.95rem", "0.9rem"]
+
+[theme.sidebar]
+backgroundColor = "#f5f4ef"
+secondaryBackgroundColor = "#eeece5"
