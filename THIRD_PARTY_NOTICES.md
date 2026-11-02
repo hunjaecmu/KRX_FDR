@@ -9,6 +9,7 @@
 | [pandas](https://pandas.pydata.org) | 2.3.3 | BSD-3-Clause | 데이터 처리 |
 | [NumPy](https://numpy.org) | 2.4.3 | BSD-3-Clause 외 (0BSD, MIT, Zlib, CC0-1.0) | 수치 계산 |
 | [Apache Arrow (pyarrow)](https://arrow.apache.org) | 23.0.1 | Apache-2.0 | Parquet 데이터 읽기·쓰기 |
+| [TradingView Lightweight Charts™](https://www.tradingview.com/lightweight-charts/) | 5.2.1 | Apache-2.0 | 메인 버전의 대화형 차트. 제작: [TradingView](https://www.tradingview.com/) |
 | [Matplotlib](https://matplotlib.org) | 3.10.8 | Matplotlib License (PSF 계열) | 차트 |
 | [mplfinance](https://github.com/matplotlib/mplfinance) | 0.12.10b0 | BSD 계열 | 캔들 차트 |
 | [Pillow](https://python-pillow.github.io) | 12.3.0 | MIT-CMU | 썸네일 이미지 처리 |

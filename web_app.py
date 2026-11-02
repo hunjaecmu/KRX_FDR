@@ -14,6 +14,7 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 try:
     from streamlit_image_select import image_select
@@ -34,7 +35,7 @@ from config import (
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
 from webapp import data_status as data_status_module
-from webapp import lite_data, storage, thumbnails, workflow
+from webapp import lite_data, storage, thumbnails, tv_chart, workflow
 
 
 CLOUD_EDITION = os.getenv("KRX_APP_EDITION") == "cloud"
@@ -566,14 +567,9 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
         return
 
     try:
-        fig, anchor_date = build_historical_chart_figure(
-            code=str(state["code"]),
-            name=str(state["name"]),
-            timeframe=str(state["timeframe"]),
-            target_date=pd.to_datetime(state["target_date"]),
-            lookback_bars=LOOKBACK_BARS,
+        show_chart, anchor_date = _build_stock_chart(
+            str(state["code"]), str(state["name"]), str(state["timeframe"]), state["target_date"]
         )
-
         state["target_date"] = anchor_date.strftime("%Y-%m-%d")
         st.session_state[state_key] = state
 
@@ -581,7 +577,7 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
             f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
         )
-        st.pyplot(fig, width="stretch")
+        show_chart()
 
         if LITE_EDITION:
             return
@@ -979,29 +975,21 @@ div[data-testid="stTextArea"] textarea {
                     st.error(f"차트 이동 실패: {move_e}")
 
             try:
-                fig, anchor_date = build_historical_chart_figure(
-                    code=str(state["code"]),
-                    name=str(state["name"]),
-                    timeframe=str(state["timeframe"]),
-                    target_date=pd.to_datetime(state["target_date"]),
-                    lookback_bars=LOOKBACK_BARS,
+                show_chart, anchor_date = _build_stock_chart(
+                    str(state["code"]),
+                    str(state["name"]),
+                    str(state["timeframe"]),
+                    state["target_date"],
+                    origin_date_text=str(state.get("origin_target_date", state["target_date"])),
                 )
                 state["target_date"] = anchor_date.strftime("%Y-%m-%d")
                 st.session_state[chart_state_key] = state
-
-                _add_anchor_guides_to_chart(
-                    fig=fig,
-                    code=str(state["code"]),
-                    timeframe=str(state["timeframe"]),
-                    current_target_date_text=str(state["target_date"]),
-                    origin_target_date_text=str(state.get("origin_target_date", state["target_date"])),
-                )
 
                 st.success(
                     f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                     f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                 )
-                st.pyplot(fig, width="stretch")
+                show_chart()
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
@@ -1229,29 +1217,21 @@ def _render_saved_pattern_data() -> None:
                     st.error(f"차트 이동 실패: {move_e}")
 
             try:
-                fig, anchor_date = build_historical_chart_figure(
-                    code=str(state["code"]),
-                    name=str(state["name"]),
-                    timeframe=str(state["timeframe"]),
-                    target_date=pd.to_datetime(state["target_date"]),
-                    lookback_bars=LOOKBACK_BARS,
+                show_chart, anchor_date = _build_stock_chart(
+                    str(state["code"]),
+                    str(state["name"]),
+                    str(state["timeframe"]),
+                    state["target_date"],
+                    origin_date_text=str(state.get("origin_target_date", state["target_date"])),
                 )
                 state["target_date"] = anchor_date.strftime("%Y-%m-%d")
                 st.session_state[chart_state_key] = state
-
-                _add_anchor_guides_to_chart(
-                    fig=fig,
-                    code=str(state["code"]),
-                    timeframe=str(state["timeframe"]),
-                    current_target_date_text=str(state["target_date"]),
-                    origin_target_date_text=str(state.get("origin_target_date", state["target_date"])),
-                )
 
                 st.success(
                     f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                     f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                 )
-                st.pyplot(fig, width="stretch")
+                show_chart()
             except Exception as chart_e:
                 st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
@@ -1393,6 +1373,58 @@ def _timeframe_close_at_or_before(code: str, timeframe: str, target_date_text: s
         return None
 
     return float(valid.iloc[-1]["close"])
+
+
+def _build_stock_chart(
+    code: str,
+    name: str,
+    timeframe: str,
+    target_date_text: str,
+    origin_date_text: Optional[str] = None,
+    buy_price: Optional[float] = None,
+):
+    """차트를 준비해 (표시 함수, 기준봉 날짜)를 돌려준다. 메인은 대화형, 경량과 서버는 이미지 차트를 쓴다."""
+    target_date = pd.to_datetime(target_date_text)
+    if LITE_EDITION:
+        fig, anchor_date = build_historical_chart_figure(
+            code=code, name=name, timeframe=timeframe, target_date=target_date, lookback_bars=LOOKBACK_BARS
+        )
+        if origin_date_text:
+            _add_anchor_guides_to_chart(
+                fig=fig,
+                code=code,
+                timeframe=timeframe,
+                current_target_date_text=anchor_date.strftime("%Y-%m-%d"),
+                origin_target_date_text=origin_date_text,
+            )
+        if buy_price is not None and getattr(fig, "axes", None):
+            fig.axes[0].axhline(y=buy_price, color="#000000", linestyle="-", linewidth=0.7, alpha=0.95, zorder=10)
+        return (lambda: st.pyplot(fig, width="stretch")), anchor_date
+
+    df = load_weekly(code) if timeframe == "weekly" else load_monthly(code)
+    price_lines = []
+    marker_date = None
+    if origin_date_text:
+        origin_close = _timeframe_close_at_or_before(
+            code=code, timeframe=timeframe, target_date_text=pd.to_datetime(origin_date_text).strftime("%Y-%m-%d")
+        )
+        if origin_close is not None:
+            price_lines.append({"price": float(origin_close), "title": "기준"})
+        marker_date = pd.to_datetime(origin_date_text)
+    if buy_price is not None:
+        price_lines.append({"price": buy_price, "title": "매수가"})
+
+    label = "주봉" if timeframe == "weekly" else "월봉"
+    payload = tv_chart.build_payload(
+        df,
+        target_date,
+        f"{name} ({code}) {label}",
+        LOOKBACK_BARS,
+        price_lines=price_lines,
+        marker_date=marker_date,
+    )
+    chart_html = tv_chart.render_html(payload)
+    return (lambda: components.html(chart_html, height=tv_chart.CHART_HEIGHT)), pd.to_datetime(payload["anchor"])
 
 
 def _add_anchor_guides_to_chart(
@@ -2050,32 +2082,22 @@ div[data-testid="stTextArea"] textarea {
                         st.error(f"차트 이동 실패: {move_e}")
 
                 try:
-                    fig, anchor_date = build_historical_chart_figure(
-                        code=str(state["code"]),
-                        name=str(state["name"]),
-                        timeframe=str(state["timeframe"]),
-                        target_date=pd.to_datetime(state["target_date"]),
-                        lookback_bars=LOOKBACK_BARS,
+                    buy_price = pd.to_numeric(picked.get("buy_price"), errors="coerce")
+                    show_chart, anchor_date = _build_stock_chart(
+                        str(state["code"]),
+                        str(state["name"]),
+                        str(state["timeframe"]),
+                        state["target_date"],
+                        buy_price=float(buy_price) if pd.notna(buy_price) else None,
                     )
                     state["target_date"] = anchor_date.strftime("%Y-%m-%d")
                     st.session_state[chart_state_key] = state
-
-                    buy_price = pd.to_numeric(picked.get("buy_price"), errors="coerce")
-                    if pd.notna(buy_price) and fig is not None and getattr(fig, "axes", None):
-                        fig.axes[0].axhline(
-                            y=float(buy_price),
-                            color="#000000",
-                            linestyle="-",
-                            linewidth=0.7,
-                            alpha=0.95,
-                            zorder=10,
-                        )
 
                     st.success(
                         f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
                         f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
                     )
-                    st.pyplot(fig, width="stretch")
+                    show_chart()
                 except Exception as chart_e:
                     st.error(f"차트 생성 실패: {chart_e}")
             else:
@@ -2511,7 +2533,18 @@ def _render_case_gallery(
         ),
         unsafe_allow_html=True,
     )
-    st.image(selected["image_path"], width="stretch")
+    try:
+        if LITE_EDITION:
+            raise ValueError("경량과 서버 버전은 저장된 차트 이미지를 사용합니다.")
+        show_review_chart, _ = _build_stock_chart(
+            code_text,
+            name_text,
+            _infer_timeframe_from_case_key(case_key),
+            str(selected.get("date", "")).strip(),
+        )
+        show_review_chart()
+    except (ValueError, KeyError, TypeError, FileNotFoundError):
+        st.image(selected["image_path"], width="stretch")
     st.caption(
         f"{current_idx + 1}/{len(gallery_items)} | {selected.get('caption', '')} | "
         f"돌파율 {pct_text} | {vol_text}"
