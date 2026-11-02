@@ -12,6 +12,8 @@
 - 종목코드-종목명 맵 생성 (`get_name_map`)
 - 코드별 종목명 조회 (`get_ticker_name`)
 - 일/주/월 CSV 로드 (`load_raw_daily`, `load_daily`, `load_weekly`, `load_monthly`)
+- 서버 버전의 주봉/월봉 Parquet 로드
+- KOSPI, KOSDAQ 지수 주봉/월봉 로드
 
 ## 2. 데이터 경로
 
@@ -22,6 +24,8 @@
 - `derived/daily/*.csv`
 - `derived/weekly/*.csv`
 - `derived/monthly/*.csv`
+- `index/weekly/*.csv`, `index/monthly/*.csv`: 지수 (`KS11`, `KQ11`)
+- `lite/prices.parquet`: 서버 버전 (`KRX_DATA_SOURCE=parquet`일 때 주봉/월봉에 사용)
 
 ## 3. 로딩 규칙
 
@@ -29,13 +33,13 @@
 
 `_find_file(folder, code)`:
 
-- `code`를 6자리로 정규화
+- `code`를 6자리로 정규화 (지수 코드는 그대로 사용)
 - 파일명 패턴 `{code}_*.csv`에 매칭되는 파일 중 수정 시각이 가장 최근인 파일 반환
 - 없으면 `None`
 
 ### 3.2 CSV 정규화
 
-`_load_csv_with_date(file_path)`:
+`_load_csv_with_date(file_path)`와 `_load_parquet_prices(code, timeframe)`는 `_normalize_prices`로 같은 정규화를 거칩니다.
 
 - `date` 컬럼이 있으면 datetime 변환
 - 숫자형 후보 컬럼(`open/high/low/close/volume/ma*`)을 `to_numeric` 변환
@@ -60,6 +64,7 @@
 - 파일이 없으면 `FileNotFoundError` 발생 가능
 - 종목명 변경으로 동일 코드 파일이 여러 개이면 가장 최근에 갱신된 파일을 사용 (옛 이름의 파일은 자동 삭제되지 않음)
 - 스키마가 달라진 CSV는 숫자 변환 과정에서 `NaN`이 생길 수 있음
+- Parquet 모드에서는 일봉(`load_daily`, `load_raw_daily`)을 쓸 수 없음 (서버 버전에서 사용하지 않음)
 
 ## 6. 사용 예시
 
@@ -76,4 +81,5 @@ print(w.tail(3)[["date", "close", "ma10", "volume"]])
 ## 7. 의존성
 
 - pandas
-- config.py (`DATA_DIR`)
+- pyarrow (Parquet 모드)
+- config.py (`DATA_DIR`, `INDEX_TICKERS`)

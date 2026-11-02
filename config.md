@@ -52,7 +52,12 @@
   - 주/월봉 분류별 고정 저장 파일명 목록
   - `web_app.py`에서 패턴 데이터 저장 파일 선택에 사용
 
-### 2.6 실행 모드
+### 2.6 시장 지수
+
+- `INDEX_TICKERS = [("KS11", "KOSPI"), ("KQ11", "KOSDAQ")]`
+  - 전체 업데이트 때 수집하는 지수. 종목 마스터와 분리되어 스캔 대상이 아닙니다.
+
+### 2.7 실행 모드
 
 - `RUN_MODE = "batch"` 또는 `"manual"`
 - `RUN_MODE`에 따라 자동 설정:
@@ -61,8 +66,10 @@
 
 ## 3. 운영 팁
 
-- Streamlit Cloud 등 호스팅 환경에서는 코드 수정 대신 환경변수 설정을 권장합니다.
+- 경로를 바꿀 때는 코드 수정 대신 환경변수 설정을 권장합니다.
   - `APP_DATA_DIR` 또는 `DATA_DIR`/`OUTPUT_DIR`
+- 웹 앱과 데이터 묶음 관련 환경변수는 `config.py`가 아닌 각 모듈에서 읽습니다.
+  - `KRX_APP_EDITION`, `KRX_DATA_SOURCE`, `KRX_DATA_REPO`, `KRX_DATA_TOKEN`, `KRX_DATA_API`, `KRX_DATA_UPLOADS`
 - `config.py`는 시작 시 데이터/출력/tracking 폴더를 자동 생성합니다.
 - 서버/자동배치에서는 보통 `RUN_MODE="batch"`를 권장합니다.
 - 차트를 화면으로 확인하려면 `RUN_MODE="manual"`로 전환하세요.

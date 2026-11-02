@@ -36,6 +36,7 @@
 | 서버 (`cloud`) | `lite/streamlit_app.py` | 시작화면, 돌파 종목 조회, 종목 차트 조회, 주요 종목 | 내려받은 묶음 | 터미널 테마 |
 
 - 경량과 서버 버전에는 관심저장 기능이 없습니다.
+- 큰 차트는 서버 버전이 어두운 대화형 차트, 로컬 경량 버전이 이미지 차트입니다.
 - 서버 버전에는 데이터 업데이트와 스캔 메뉴도 없습니다.
 - 주소의 메뉴 번호(`?menu=3`)는 모든 버전에서 같습니다. 해당 버전에 없는 번호는 시작화면으로 이동합니다.
 - 서버 버전을 CSV가 아닌 Parquet로 읽도록 `lite/streamlit_app.py`가 `KRX_DATA_SOURCE=parquet`를 설정합니다.
@@ -51,6 +52,9 @@
 | `lite/requirements.txt` | 서버용 패키지 목록 (버전 고정) |
 | `packages.txt` | 차트 한글 글꼴(`fonts-nanum`). 반드시 저장소 루트에 있어야 함 |
 | `webapp/lite_data.py` | 데이터 묶음 생성, 업로드, 내려받기, 설치 |
+| `webapp/auto_publish.py` | 전체 업데이트와 스캔 후 자동 업로드 |
+| `webapp/tv_chart.py`, `webapp/vendor/` | 대화형 차트와 Lightweight Charts v5.2.1 |
+| `THIRD_PARTY_NOTICES.md` | 시작화면에 표시하는 오픈소스 및 면책 고지 |
 | `scripts/publish_lite_data.py` | 묶음을 만들어 올리는 실행 스크립트 |
 | `scripts/publish_lite_data.md` | 위 스크립트 사용법 |
 | `tests/test_lite_data.py` | 묶음, Parquet 일치 여부, 내려받기, 서버 진입점 테스트 |
@@ -59,11 +63,13 @@
 
 | 파일 | 변경 |
 |---|---|
-| `web_app.py` | 서버 버전 메뉴와 표시 이름, 시작 시 데이터 동기화, 메뉴 번호 처리 변경 |
-| `data_loader.py` | 주봉/월봉을 Parquet에서 종목별로 읽는 경로 추가. CSV 경로는 그대로 유지 |
+| `web_app.py` | 서버 버전 메뉴와 표시 이름, 시작 시 데이터 동기화, 메뉴 번호 처리, 주요 종목, 대화형 차트, 시작화면 설명 |
+| `data_loader.py` | 주봉/월봉을 Parquet에서 종목별로 읽는 경로와 지수 코드 처리 추가. CSV 경로는 그대로 유지 |
+| `data_store.py` | KOSPI, KOSDAQ 지수 수집, 전체 업데이트 후 자동 업로드 |
+| `config.py` | `INDEX_TICKERS` 추가 |
 | `webapp/data_status.py` | `web_app.py`의 데이터 현황 계산을 Streamlit 없이 쓰도록 분리 |
 | `webapp/thumbnails.py` | 썸네일을 240px JPEG로 축소 |
-| `.gitignore` | `/.app_data/lite_bundle/` 제외 |
+| `.gitignore` | `/.app_data/lite_bundle/`, `/.app_data/data/index/` 제외 |
 | `README.md` | 경량 버전과 배포 안내 추가 |
 
 ### 배포 전에 먼저 적용한 경량 버전
@@ -179,6 +185,9 @@ scan
 | 서버 실행 `ModuleNotFoundError` (`six.moves`) | `mplfinance`가 `six`를 쓰지만 의존성으로 선언하지 않음 | `six==1.17.0` 추가 |
 | 시작화면 종목 수 0 (검증 중 발견) | 코드 분리 시 `pandas` import 누락을 포괄적 예외 처리가 숨김 | import 추가, 회귀 테스트 추가 |
 | 썸네일 영역이 밝게 뒤집힘 (검증 중 발견) | 부품 내부는 CSS로 제어 불가 | 어두운 축소 이미지를 직접 생성 |
+| 지수 요약 JSON이 git에 잡힘 (검증 중 발견) | `.gitignore`가 CSV만 제외 | `/.app_data/data/index/` 제외 |
+| 마감 데이터가 "장중"으로 표시 (검증 중 발견) | 수집 시각 기준으로 표시 | 지난 거래일 값은 "종가"로 표시 |
+| 차트가 전체 기간으로 펼쳐짐 (검증 중 발견) | iframe 크기가 잡히기 전 구간 지정으로 판단 | 크기가 잡힌 뒤 구간 적용 |
 
 ## 9. 검증 현황
 

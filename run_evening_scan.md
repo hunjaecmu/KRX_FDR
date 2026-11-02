@@ -4,6 +4,8 @@
 
 ## 1. 역할 요약
 
+서버용 데이터 묶음은 자동으로 올리지 않습니다. 필요하면 `scripts/publish_lite_data.py`를 실행하세요.
+
 `run_evening_scan.py`는 아래 작업을 한 번에 실행합니다.
 
 1. 시장 돌파 스캔
