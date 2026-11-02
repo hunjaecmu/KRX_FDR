@@ -10,6 +10,8 @@ RAW_DAILY_DIR = os.path.join(DATA_DIR, "raw", "daily")
 DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
 DERIVED_WEEKLY_DIR = os.path.join(DATA_DIR, "derived", "weekly")
 DERIVED_MONTHLY_DIR = os.path.join(DATA_DIR, "derived", "monthly")
+PRICES_PARQUET = os.path.join(DATA_DIR, "lite", "prices.parquet")
+USE_PARQUET = os.getenv("KRX_DATA_SOURCE") == "parquet"
 
 
 def get_weekly_file_path(code: str):
@@ -71,8 +73,23 @@ def _load_csv_with_date(file_path: str) -> pd.DataFrame:
     if file_path is None or not os.path.exists(file_path):
         raise FileNotFoundError(file_path)
 
-    df = pd.read_csv(file_path)
+    return _normalize_prices(pd.read_csv(file_path))
 
+
+def _load_parquet_prices(code: str, timeframe: str) -> pd.DataFrame:
+    code = str(code).zfill(6)
+    df = pd.read_parquet(PRICES_PARQUET, filters=[("timeframe", "==", timeframe), ("code", "==", code)])
+    if df.empty:
+        raise FileNotFoundError(f"{code} {timeframe}")
+
+    df = df.drop(columns=["code", "timeframe"])
+    for col in df.columns:
+        if str(df[col].dtype) in ("string", "str"):
+            df[col] = df[col].astype(object).where(df[col].notna(), None)
+    return _normalize_prices(df)
+
+
+def _normalize_prices(df: pd.DataFrame) -> pd.DataFrame:
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])
 
@@ -102,8 +119,12 @@ def load_daily(code: str) -> pd.DataFrame:
 
 
 def load_weekly(code: str) -> pd.DataFrame:
+    if USE_PARQUET:
+        return _load_parquet_prices(code, "weekly")
     return _load_csv_with_date(_find_file(DERIVED_WEEKLY_DIR, code))
 
 
 def load_monthly(code: str) -> pd.DataFrame:
+    if USE_PARQUET:
+        return _load_parquet_prices(code, "monthly")
     return _load_csv_with_date(_find_file(DERIVED_MONTHLY_DIR, code))

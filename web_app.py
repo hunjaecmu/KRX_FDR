@@ -32,10 +32,12 @@ from config import (
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
-from webapp import storage, thumbnails, workflow
+from webapp import data_status as data_status_module
+from webapp import lite_data, storage, thumbnails, workflow
 
 
-LITE_EDITION = os.getenv("KRX_APP_EDITION") == "lite"
+CLOUD_EDITION = os.getenv("KRX_APP_EDITION") == "cloud"
+LITE_EDITION = CLOUD_EDITION or os.getenv("KRX_APP_EDITION") == "lite"
 
 st.set_page_config(
     page_title="KRX FDR Lite" if LITE_EDITION else "KRX FDR Dashboard",
@@ -2087,130 +2089,11 @@ def render_log_box(lines: list[str], max_lines: int = 500) -> None:
     st.markdown(_render_log_html_box(lines, max_lines=max_lines), unsafe_allow_html=True)
 
 
-def _read_last_non_empty_line(file_path: str) -> Optional[str]:
-    if not os.path.isfile(file_path):
-        return None
-
-    with open(file_path, "rb") as fh:
-        fh.seek(0, os.SEEK_END)
-        size = fh.tell()
-        if size <= 0:
-            return None
-
-        pos = size - 1
-        while pos >= 0:
-            fh.seek(pos)
-            ch = fh.read(1)
-            if ch not in (b"\n", b"\r"):
-                break
-            pos -= 1
-
-        if pos < 0:
-            return None
-
-        line = bytearray()
-        while pos >= 0:
-            fh.seek(pos)
-            ch = fh.read(1)
-            if ch in (b"\n", b"\r"):
-                break
-            line.extend(ch)
-            pos -= 1
-
-    return line[::-1].decode("utf-8", errors="ignore").strip()
-
-
 @st.cache_data(show_spinner=False, ttl=300)
 def get_data_status(data_dir: str) -> dict:
-    status = {
-        "kospi_count": 0,
-        "kosdaq_count": 0,
-        "latest_trade_date": None,
-        "latest_collection_date": None,
-        "latest_collection_time": None,
-        "daily_file_count": 0,
-    }
-
-    master_csv = os.path.join(data_dir, "master", "kospi_tickers.csv")
-    code_market: dict = {}
-    market_names = ("KOSPI", "KOSDAQ", "ETF")
-    status["markets"] = {
-        m: {"count": 0, "file_count": 0, "latest_trade_date": None,
-            "latest_collection_date": None, "latest_collection_time": None, "_key": None}
-        for m in market_names
-    }
-    if os.path.isfile(master_csv):
-        try:
-            mdf = storage.read_csv(master_csv, dtype={"code": str})
-            market_series = mdf.get("market", pd.Series(dtype=str)).fillna("").astype(str).str.upper()
-            status["kospi_count"] = int((market_series == "KOSPI").sum())
-            status["kosdaq_count"] = int((market_series == "KOSDAQ").sum())
-            for code, mk in zip(mdf["code"].astype(str).str.zfill(6), market_series):
-                grp = "KOSDAQ" if mk.startswith("KOSDAQ") else ("ETF" if mk.startswith("ETF") else "KOSPI")
-                code_market[code] = grp
-                status["markets"][grp]["count"] += 1
-        except Exception:
-            pass
-
-    daily_dir = os.path.join(data_dir, "derived", "daily")
-    if not os.path.isdir(daily_dir):
-        return status
-
-    daily_files = [f for f in os.listdir(daily_dir) if f.lower().endswith(".csv")]
-    status["daily_file_count"] = len(daily_files)
-
-    latest_trade = None
-    latest_collection = None
-    latest_collection_time = None
-    latest_collection_key = None
-    counted_codes: set = set()
-    for file_name in daily_files:
-        last_line = _read_last_non_empty_line(os.path.join(daily_dir, file_name))
-        if not last_line:
-            continue
-
-        cols = [c.strip() for c in last_line.split(",")]
-        file_code = file_name.split("_", 1)[0]
-        mstat = status["markets"].get(code_market.get(file_code))
-        # 종목명 변경으로 남은 옛 파일·상폐 파일은 제외하고, 마스터 종목 코드당 1회만 집계한다.
-        if mstat is not None and file_code not in counted_codes:
-            counted_codes.add(file_code)
-            mstat["file_count"] += 1
-        if cols:
-            trade_date = cols[0]
-            if trade_date and (latest_trade is None or trade_date > latest_trade):
-                latest_trade = trade_date
-            if mstat is not None and trade_date and (
-                mstat["latest_trade_date"] is None or trade_date > mstat["latest_trade_date"]
-            ):
-                mstat["latest_trade_date"] = trade_date
-
-        if len(cols) >= 15 and cols[13] and cols[14] and mstat is not None:
-            key = f"{cols[13]} {cols[14]}"
-            if mstat["_key"] is None or key > mstat["_key"]:
-                mstat["_key"] = key
-                mstat["latest_collection_date"] = cols[13]
-                mstat["latest_collection_time"] = cols[14]
-
-        if len(cols) >= 14:
-            collection_date = cols[13]
-            if collection_date and (latest_collection is None or collection_date > latest_collection):
-                latest_collection = collection_date
-
-        if len(cols) >= 15:
-            collection_date = cols[13]
-            collection_time = cols[14]
-            if collection_date and collection_time:
-                key = f"{collection_date} {collection_time}"
-                if latest_collection_key is None or key > latest_collection_key:
-                    latest_collection_key = key
-                    latest_collection = collection_date
-                    latest_collection_time = collection_time
-
-    status["latest_trade_date"] = latest_trade
-    status["latest_collection_date"] = latest_collection
-    status["latest_collection_time"] = latest_collection_time
-    return status
+    if CLOUD_EDITION:
+        return lite_data.load_manifest(data_dir)["data_status"]
+    return data_status_module.compute_data_status(data_dir)
 
 
 @st.cache_data(show_spinner=False, ttl=120)
@@ -2674,7 +2557,12 @@ FULL_MENU_ITEMS = [
     "8. 보유 종목 조회",
 ]
 
-MENU_ITEMS = FULL_MENU_ITEMS[:5] if LITE_EDITION else FULL_MENU_ITEMS
+if CLOUD_EDITION:
+    MENU_ITEMS = [START_MENU, "3. 서칭 데이터 조회", "4. 관심종목 서칭"]
+elif LITE_EDITION:
+    MENU_ITEMS = FULL_MENU_ITEMS[:5]
+else:
+    MENU_ITEMS = FULL_MENU_ITEMS
 
 REVIEW_CASE_ORDER = [
     "weekly_ma10_breakout",
@@ -2703,8 +2591,8 @@ def _resolve_menu_from_query() -> str:
     raw_text = str(raw_menu)
     try:
         menu_index = int(raw_text)
-        if 0 <= menu_index < len(MENU_ITEMS):
-            return MENU_ITEMS[menu_index]
+        if 0 <= menu_index < len(FULL_MENU_ITEMS) and FULL_MENU_ITEMS[menu_index] in MENU_ITEMS:
+            return FULL_MENU_ITEMS[menu_index]
     except Exception:
         pass
 
@@ -2742,11 +2630,19 @@ LITE_MENU_GROUPS = [
     ("종목", ["4. 관심종목 서칭"]),
 ]
 
+CLOUD_MENU_GROUPS = [
+    (None, [START_MENU]),
+    ("조회", ["3. 서칭 데이터 조회", "4. 관심종목 서칭"]),
+]
+
 # 경량 버전은 저장 기능이 없어 4번 메뉴를 차트 조회로 표시한다.
 LITE_MENU_LABELS = {"4. 관심종목 서칭": "4. 종목 차트 조회"}
+CLOUD_MENU_LABELS = {"3. 서칭 데이터 조회": "돌파 종목 조회", "4. 관심종목 서칭": "종목 차트 조회"}
 
 
 def _menu_label(menu: str) -> str:
+    if CLOUD_EDITION:
+        return CLOUD_MENU_LABELS.get(menu, menu)
     return LITE_MENU_LABELS.get(menu, menu) if LITE_EDITION else menu
 
 
@@ -2808,7 +2704,9 @@ if "data_store_progress_text" not in st.session_state:
     st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
 
 st.sidebar.markdown("### KRX FDR Lite" if LITE_EDITION else "### KRX FDR")
-for group_title, group_menus in LITE_MENU_GROUPS if LITE_EDITION else MENU_GROUPS:
+for group_title, group_menus in (
+    CLOUD_MENU_GROUPS if CLOUD_EDITION else LITE_MENU_GROUPS if LITE_EDITION else MENU_GROUPS
+):
     if group_title:
         st.sidebar.markdown(f"<div class='menu-group'>{group_title}</div>", unsafe_allow_html=True)
     for menu in group_menus:
@@ -2817,13 +2715,45 @@ for group_title, group_menus in LITE_MENU_GROUPS if LITE_EDITION else MENU_GROUP
             _menu_label(menu), key=f"menu_btn_{menu}", width="stretch", type=button_type, icon=MENU_ICONS[menu]
         ):
             st.session_state.selected_menu = menu
-            st.query_params["menu"] = str(MENU_ITEMS.index(menu))
+            st.query_params["menu"] = str(FULL_MENU_ITEMS.index(menu))
             st.rerun()
 
 selected_menu = st.session_state.selected_menu
 if selected_menu in MENU_ITEMS:
-    st.query_params["menu"] = str(MENU_ITEMS.index(selected_menu))
+    st.query_params["menu"] = str(FULL_MENU_ITEMS.index(selected_menu))
 st.session_state.show_intro = selected_menu == START_MENU
+
+def _cloud_setting(name: str) -> Optional[str]:
+    if name in os.environ:
+        return os.environ[name]
+    try:
+        return st.secrets.get(name)
+    except Exception:
+        return None
+
+
+@st.cache_resource(ttl=3600, show_spinner="최신 데이터를 확인하는 중입니다...")
+def _download_cloud_data() -> bool:
+    return lite_data.ensure_data(
+        _cloud_setting("KRX_DATA_REPO"),
+        _cloud_setting("KRX_DATA_TOKEN"),
+        DATA_DIR,
+        OUTPUT_DIR,
+        api=_cloud_setting("KRX_DATA_API") or lite_data.DEFAULT_API,
+    )
+
+
+def _sync_cloud_data() -> None:
+    if not _cloud_setting("KRX_DATA_REPO"):
+        st.error("KRX_DATA_REPO 설정이 없습니다. 앱 Secrets를 확인하세요.")
+        st.stop()
+    try:
+        if _download_cloud_data():
+            st.cache_data.clear()
+    except Exception as e:
+        st.error(f"데이터를 내려받지 못했습니다: {e}")
+        st.stop()
+
 
 def _render_workflow_steps(steps: list[dict]) -> None:
     done_count = sum(step["state"] == workflow.DONE for step in steps)
@@ -2844,12 +2774,16 @@ def _render_workflow_steps(steps: list[dict]) -> None:
     )
 
 
+if CLOUD_EDITION:
+    _sync_cloud_data()
+
 data_status = get_data_status(DATA_DIR)
 scan_status = get_scan_status(OUTPUT_DIR)
 
 if st.session_state.show_intro:
     st.title("KRX FDR Lite" if LITE_EDITION else "KRX FDR")
-    _render_workflow_steps(workflow.build_steps(data_status, scan_status, date.today()))
+    if not CLOUD_EDITION:
+        _render_workflow_steps(workflow.build_steps(data_status, scan_status, date.today()))
     st.markdown("#### 데이터 현황")
     intro_cards = [
         ("KOSPI 종목 수", f"{data_status['kospi_count']:,}"),
