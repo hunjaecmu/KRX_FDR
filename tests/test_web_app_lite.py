@@ -64,7 +64,8 @@ class LiteEditionTests(unittest.TestCase):
 
     def test_menu_5_to_8_are_removed(self):
         labels = self.menu_labels(self.run_app("0"))
-        self.assertEqual(len(labels), 5)
+        self.assertEqual(len(labels), 6)
+        self.assertIn("사용 가이드", labels)
         self.assertFalse(any(label[0] in "5678" for label in labels))
         self.assertIn("4. 종목 차트 조회", labels)
 
@@ -123,7 +124,8 @@ class FullEditionTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "KRX_APP_EDITION"}
         with mock.patch.dict(os.environ, env, clear=True):
             at = AppTest.from_file(os.path.join(ROOT, "web_app.py"), default_timeout=60).run()
-        self.assertEqual(len(at.sidebar.button), 9)
+        self.assertEqual(len(at.sidebar.button), 10)
+        self.assertIn("사용 가이드", [b.label for b in at.sidebar.button])
         self.assertNotIn("주요 종목", [b.label for b in at.sidebar.button])
 
 

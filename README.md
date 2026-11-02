@@ -240,6 +240,8 @@ python -m unittest discover -s tests
 
 ## 문서
 
+사용법은 앱 왼쪽 메뉴의 **사용 가이드**에서 볼 수 있습니다 (`webapp/user_guide.html`).
+
 모듈별 상세 문서:
 
 - `data_store.md`
