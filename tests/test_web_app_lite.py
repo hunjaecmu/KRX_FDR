@@ -108,6 +108,7 @@ class FullEditionTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             at = AppTest.from_file(os.path.join(ROOT, "web_app.py"), default_timeout=60).run()
         self.assertEqual(len(at.sidebar.button), 9)
+        self.assertNotIn("주요 종목", [b.label for b in at.sidebar.button])
 
 
 class LauncherTests(unittest.TestCase):

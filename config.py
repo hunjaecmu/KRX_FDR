@@ -28,6 +28,9 @@ RECORD_FILE_OPTIONS = [
     ("월봉 240이평 돌파 매매", "MA240_W_Break.csv"),
 ]
 
+# 시장 지수: 종목 마스터와 분리해 스캔 대상에서 제외한다.
+INDEX_TICKERS = [("KS11", "KOSPI"), ("KQ11", "KOSDAQ")]
+
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TRACKING_INPUT_DIR, exist_ok=True)

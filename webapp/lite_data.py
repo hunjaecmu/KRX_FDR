@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 import requests
 
 import data_loader
+from config import INDEX_TICKERS
 
 BUNDLE_NAME = "krx_lite_data.zip"
 RELEASE_TAG = "lite-data"
@@ -51,6 +52,13 @@ def latest_scan_dir(output_dir: str) -> Optional[str]:
     return os.path.join(output_dir, sorted(names)[-1]) if names else None
 
 
+def available_indices() -> list[str]:
+    return [
+        code for code, _ in INDEX_TICKERS
+        if data_loader._find_file(data_loader.INDEX_WEEKLY_DIR, code) is not None
+    ]
+
+
 def write_prices_parquet(data_dir: str, master: pd.DataFrame, target_path: str) -> int:
     frames = []
     for code in master["code"]:
@@ -62,6 +70,12 @@ def write_prices_parquet(data_dir: str, master: pd.DataFrame, target_path: str) 
             frame["code"] = code
             frame["timeframe"] = timeframe
             frames.append(frame)
+
+    for code in available_indices():
+        frame = pd.read_csv(data_loader._find_file(data_loader.INDEX_WEEKLY_DIR, code))
+        frame["code"] = code
+        frame["timeframe"] = "weekly"
+        frames.append(frame)
 
     prices = pd.concat(frames, ignore_index=True)
     prices["is_final"] = prices["is_final"].astype(str).str.lower()
@@ -89,6 +103,7 @@ def build_bundle(data_dir: str, output_dir: str, data_status: dict, target_path:
     manifest = {
         "built_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "scan": os.path.basename(scan_dir),
+        "indices": available_indices(),
         "data_status": data_status,
     }
     with tempfile.TemporaryDirectory() as temp_dir:

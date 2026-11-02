@@ -2,7 +2,7 @@
 
 import os
 import pandas as pd
-from config import DATA_DIR
+from config import DATA_DIR, INDEX_TICKERS
 
 MASTER_FILE = os.path.join(DATA_DIR, "master", "kospi_tickers.csv")
 
@@ -10,6 +10,8 @@ RAW_DAILY_DIR = os.path.join(DATA_DIR, "raw", "daily")
 DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
 DERIVED_WEEKLY_DIR = os.path.join(DATA_DIR, "derived", "weekly")
 DERIVED_MONTHLY_DIR = os.path.join(DATA_DIR, "derived", "monthly")
+INDEX_WEEKLY_DIR = os.path.join(DATA_DIR, "index", "weekly")
+INDEX_CODES = {code for code, _ in INDEX_TICKERS}
 PRICES_PARQUET = os.path.join(DATA_DIR, "lite", "prices.parquet")
 USE_PARQUET = os.getenv("KRX_DATA_SOURCE") == "parquet"
 
@@ -50,8 +52,13 @@ def get_ticker_name(code: str):
     return row.iloc[0]["name"]
 
 
+def _normalize_code(code: str) -> str:
+    code = str(code)
+    return code if code in INDEX_CODES else code.zfill(6)
+
+
 def _find_file(folder: str, code: str):
-    code = str(code).zfill(6)
+    code = _normalize_code(code)
 
     if not os.path.exists(folder):
         return None
@@ -77,7 +84,7 @@ def _load_csv_with_date(file_path: str) -> pd.DataFrame:
 
 
 def _load_parquet_prices(code: str, timeframe: str) -> pd.DataFrame:
-    code = str(code).zfill(6)
+    code = _normalize_code(code)
     df = pd.read_parquet(PRICES_PARQUET, filters=[("timeframe", "==", timeframe), ("code", "==", code)])
     if df.empty:
         raise FileNotFoundError(f"{code} {timeframe}")
@@ -121,7 +128,8 @@ def load_daily(code: str) -> pd.DataFrame:
 def load_weekly(code: str) -> pd.DataFrame:
     if USE_PARQUET:
         return _load_parquet_prices(code, "weekly")
-    return _load_csv_with_date(_find_file(DERIVED_WEEKLY_DIR, code))
+    folder = INDEX_WEEKLY_DIR if str(code) in INDEX_CODES else DERIVED_WEEKLY_DIR
+    return _load_csv_with_date(_find_file(folder, code))
 
 
 def load_monthly(code: str) -> pd.DataFrame:
