@@ -6,9 +6,10 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 
 - 국내 주식 종목의 일봉 데이터를 로컬에 축적
 - 일봉을 기반으로 주봉/월봉 파생 데이터 및 이동평균 생성
-- 주봉/월봉 10/240이평 상향 돌파 종목 자동 탐지
+- 주봉 10/240이평, 월봉 10/120/180/240이평 상향 돌파 종목 자동 탐지
 - 보유/관심 종목의 현재 상태(수익률, 이평 거리) 스냅샷 관리
 - 차트/오버뷰/HTML로 결과를 한 번에 확인
+- 조회 전용 버전을 Streamlit Community Cloud에 비공개 배포
 
 ## 1) 이 프로젝트가 저장하는 데이터
 
@@ -31,6 +32,10 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - 원시 데이터 업데이트 실행 결과 로그
 - `logs/derived_update_result_*.csv`
   - 파생 데이터 생성 실행 결과 로그
+- `logs/update_timing.csv`
+  - 실행별 단계 시간 누적 기록
+- `index/weekly/*.csv`, `index/monthly/*.csv`, `index/*_summary.json`
+  - KOSPI, KOSDAQ 지수의 주봉, 월봉, 최신 거래일 요약 (종목 마스터와 분리되어 스캔 대상이 아님)
 
 ### B. 포지션 트래킹 입력/출력
 
@@ -48,6 +53,10 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - (선택 조회용) 과거 파일 및 `watch.csv` legacy 파일도 웹에서 조회 가능
 - `tracking/MA10_J_Break.csv` 등
   - 웹 앱 패턴 기록 저장 파일 (`config.RECORD_FILE_OPTIONS`)
+- `tracking/_backup/`
+  - 웹 앱이 저장 직전에 남기는 백업 (파일별 최근 30개)
+
+위 기록 파일은 git에 올라가지 않으므로 별도로 백업해야 합니다.
 
 ### C. 스캔 결과/차트 (`OUTPUT_DIR`)
 
@@ -59,6 +68,12 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - `charts/<scan_case>/*.png`
   - `scan_overview_*.html`
 
+### D. 서버 배포용 데이터 묶음
+
+- `.app_data/lite_bundle/krx_lite_data.zip`
+  - 최신 스캔 결과, 종목 마스터, 주봉/월봉 Parquet, 지수 요약 (`scripts/publish_lite_data.md`)
+  - 보유·관심·패턴 기록은 포함하지 않음
+
 ## 2) 이 프로젝트가 가진 기능
 
 ### A. 데이터 수집/정규화
@@ -69,6 +84,9 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 - 거래량 0 봉 보정 규칙 적용
   - `volume == 0`이면 OHLC를 마지막 거래일 종가로 보정
 - 이동평균 계산 시 거래량 0 봉 제외
+- 파생 계산은 일꾼 4개로 병렬 처리
+- 전체 업데이트 때 KOSPI, KOSDAQ 지수도 수집
+- 종목명 변경으로 같은 코드 파일이 여럿이면 가장 최근에 갱신된 파일을 사용
 
 관련 모듈:
 
@@ -81,12 +99,16 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - 주봉 10이평 돌파
   - 주봉 240이평 돌파
   - 월봉 10이평 돌파
+  - 월봉 120이평 돌파
+  - 월봉 180이평 돌파
   - 월봉 240이평 돌파
 - 돌파 조건:
   - 이전 봉 `close <= MA`
   - 현재 봉 `close > MA`
 - 거래량 0 봉은 돌파 판정에서 제외
-- 멀티프로세싱 스캔 지원
+- 이번 또는 직전 주·월보다 오래된 돌파 봉은 제외
+- ETN, 스팩은 스캔 대상에서 제외
+- 기본은 순차 처리, `max_workers`를 지정하면 멀티프로세싱
 
 관련 모듈:
 
@@ -104,6 +126,8 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 - `chart_viewer.py`
 - `replay_latest_scan.py`
 - `historical_chart_viewer.py`
+
+웹 앱의 큰 차트는 메인과 서버 버전에서 TradingView Lightweight Charts 대화형 차트를 사용합니다 (`webapp/tv_chart.py`).
 
 ### D. 포지션 트래킹
 
@@ -124,7 +148,9 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 - 데이터 업데이트 전용 실행
   - `scripts/update_data.py`
 - 스캔 전용 실행
-  - `scripts/scan_market.py`
+  - `scripts/scan_market.py`, Windows cmd에서는 `scan`
+- 서버용 데이터 묶음 업로드
+  - `scripts/publish_lite_data.py` (전체 업데이트와 스캔 후 자동 실행)
 
 ### F. 웹 앱 상호작용 확장
 
@@ -188,9 +214,10 @@ python run_position_tracking.py
 5. 웹 UI 실행(선택)
 
 ```bash
-pip install streamlit
 streamlit run web_app.py
 ```
+
+프로젝트 폴더에서 실행해야 `.streamlit/config.toml` 테마가 적용됩니다.
 
 6. 조회 전용 경량 버전 실행(선택)
 
@@ -200,7 +227,16 @@ python web_app_lite.py
 
 - 메뉴 5~8번과 저장 기능이 없고 어두운 터미널 테마를 사용합니다.
 - 기본 포트는 8502이며 전체 버전과 같은 데이터를 사용합니다.
-- Streamlit Community Cloud 배포는 `lite/streamlit_app.py`를 진입점으로 사용합니다. 데이터 전달은 `scripts/publish_lite_data.md`를 참고하세요.
+
+7. 서버 배포
+
+Streamlit Community Cloud 배포는 `lite/streamlit_app.py`를 진입점으로 사용합니다. 절차와 구조는 `lite/deploy.md`를 참고하세요.
+
+8. 테스트
+
+```bash
+python -m unittest discover -s tests
+```
 
 ## 문서
 
@@ -215,7 +251,12 @@ python web_app_lite.py
 - `run_position_tracking.md`
 - `historical_chart_viewer.md`
 - `replay_latest_scan.md`
+- `web_app.md`
+- `config.md`
+- `webapp/README.md`
 - `webapp/storage.md`
+- `lite/deploy.md`
+- `THIRD_PARTY_NOTICES.md`
 - `scripts/*.md`
 
 ## 참고

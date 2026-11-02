@@ -11,7 +11,9 @@
 - `force_master_update=False`
 - `derive_all=True`
 
-즉, 마스터는 조건부 갱신하고, 파생 데이터는 전체 종목 기준으로 재생성합니다.
+즉, 마스터는 조건부 갱신하고, 파생 데이터는 전체 종목 기준으로 재생성합니다. KOSPI, KOSDAQ 지수도 함께 갱신합니다.
+
+끝나면 서버용 데이터 묶음을 자동 업로드합니다 (`webapp/auto_publish.py`, 환경변수가 있을 때).
 
 ## 2. 실행 예시
 
@@ -27,3 +29,4 @@ python scripts/update_data.py
 ## 4. 의존성
 
 - data_store.py
+- webapp/auto_publish.py

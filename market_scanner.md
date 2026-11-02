@@ -21,12 +21,14 @@
 - `weekly_ma10_breakout`
 - `weekly_ma240_breakout`
 - `monthly_ma10_breakout`
+- `monthly_ma120_breakout`
+- `monthly_ma180_breakout`
 - `monthly_ma240_breakout`
 
 각 케이스는:
 
 - `timeframe` (`weekly`/`monthly`)
-- `ma_col` (`ma10`/`ma240`)
+- `ma_col` (`ma10`/`ma120`/`ma180`/`ma240`)
 - 표시 라벨
 
 ## 3. 돌파 판정 규칙
@@ -96,6 +98,8 @@ ETF는 스캔 대상에 포함합니다. 스캔 시작 전 종목명 기준으�
   - `weekly_ma10_breakout.csv`
   - `weekly_ma240_breakout.csv`
   - `monthly_ma10_breakout.csv`
+  - `monthly_ma120_breakout.csv`
+  - `monthly_ma180_breakout.csv`
   - `monthly_ma240_breakout.csv`
 
 정렬 기준:

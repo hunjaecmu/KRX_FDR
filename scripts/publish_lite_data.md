@@ -4,7 +4,8 @@ Streamlit Community Cloud에 배포한 경량 버전이 사용할 데이터 묶�
 
 ## 1. 역할
 
-- 최신 스캔 결과, 종목 마스터, 주봉/월봉(Parquet)을 `krx_lite_data.zip`으로 묶음
+- 최신 스캔 결과, 종목 마스터, 종목과 지수의 주봉/월봉(Parquet), 지수 요약을 `krx_lite_data.zip`으로 묶음
+- 보유·관심·패턴 기록은 포함하지 않음
 - 데이터 저장소 GitHub Release의 `lite-data` 태그에 올려 기존 파일과 교체
 - 서버 앱은 시작 후 1시간마다 새 묶음을 확인해 내려받음
 
@@ -20,6 +21,8 @@ Streamlit Community Cloud에 배포한 경량 버전이 사용할 데이터 묶�
 
 - 전체 데이터 업데이트 (웹 앱의 전체 업데이트, `scripts/update_data.py`)
 - 스캔 (웹 앱의 2번 메뉴, `scan.cmd`, `scripts/scan_market.py`)
+
+`run_evening_scan.py`에서는 자동으로 실행되지 않습니다.
 
 시장별 업데이트에서는 실행되지 않습니다. 환경변수가 없으면 건너뛰고, 업로드에 실패해도 앞선 작업은 성공으로 끝납니다.
 

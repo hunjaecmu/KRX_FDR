@@ -13,10 +13,15 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
 - 원시 일봉(raw) 수집/증분 업데이트 (`update_one_raw_stock`)
   - 저장된 과거 장중 일봉이 2일 이상 연속되면 해당 날짜 범위를 한 번에 재조회해 종가로 보정
   - 재조회 로그에는 여러 날짜의 개별 항목 대신 범위의 시작일과 종료일을 표시
+  - 종목당 원시 CSV 전체 읽기는 한 번만 수행
 - 파생 데이터 생성
   - 일봉 (`build_daily_derived`)
   - 주봉 (`build_weekly_derived`)
   - 월봉 (`build_monthly_derived`)
+- 시장 지수 갱신 (`update_indices`)
+  - KOSPI, KOSDAQ의 주봉, 월봉, 최신 거래일 요약 저장
+  - 실패하면 경고만 남기고 기존 파일 유지
+  - 지난 거래일 값은 수집 시각과 관계없이 "종가"로 표시
 - 전체 배치 실행 (`run_all`)
 
 데이터 소스는 `FinanceDataReader`입니다.
@@ -32,16 +37,21 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
 - `derived/monthly/*.csv`
 - `logs/raw_update_result_YYYYMMDD_HHMMSS.csv`
 - `logs/derived_update_result_YYYYMMDD_HHMMSS.csv`
+- `logs/update_timing.csv`
+- `index/weekly/KS11_KOSPI.csv` 등
+- `index/monthly/KS11_KOSPI.csv` 등
+- `index/KS11_summary.json` 등
 
 ## 3. 주요 설정값
 
 파일 상단 상수:
 
 - `START_YEARS_AGO = 25`
-- `MA_WINDOWS = [5, 10, 20, 120, 240]`
+- `MA_WINDOWS = [5, 10, 20, 120, 180, 240]`
 - `MAX_RETRY = 3`
 - `SLEEP_SEC_BETWEEN_TICKERS = 0.03`
 - `DERIVED_MAX_WORKERS = 4`
+- `PROGRESS_PRINT_INTERVAL = 50`
 - `SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02`
 - 장마감 기준:
   - `MARKET_CLOSE_HOUR = 15`
@@ -98,9 +108,12 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
 3. 마스터에 포함된 모든 종목 raw 업데이트 (`update_one_raw_stock`)
 4. 전체(또는 업데이트 종목만) derived를 멀티프로세싱으로 생성 (`generate_derived_all`)
    - process pool이 중단되면 남은 종목을 순차 처리
-5. 로그 CSV 저장
+5. 전체 시장 업데이트이면 지수 갱신 (`update_indices`)
+6. 로그 CSV 저장
    - `logs/update_timing.csv`에 실행별 단계 시간을 누적 (`raw_sec`, `fetch_sec`, `derived_sec`)
    - `fetch_sec`는 원시 조회 시간 합계이며 장중 보정 재조회는 포함하지 않음
+
+`python data_store.py`로 전체 시장을 실행하면 끝난 뒤 서버용 데이터 묶음을 자동 업로드합니다 (`webapp/auto_publish.py`).
 
 ## 6. 함수 개요
 
@@ -111,7 +124,9 @@ KRX(KOSPI + KOSDAQ) 및 한국 ETF 일봉 데이터를 수집하고, 파생 데�
 - 원시 데이터
   - `clean_fdr_ohlcv`, `fetch_ohlcv_with_retry`, `load_raw_daily`, `save_raw_daily`, `update_one_raw_stock`
 - 파생 데이터
-  - `build_daily_derived`, `build_weekly_derived`, `build_monthly_derived`, `save_derived_file`, `generate_derived_for_one_stock`
+  - `build_daily_derived`, `build_weekly_derived`, `build_monthly_derived`, `save_derived_file`, `generate_derived_for_one_stock`, `generate_derived_all`
+- 지수
+  - `build_index_summary`, `update_indices`
 - 배치
   - `run_all`
 

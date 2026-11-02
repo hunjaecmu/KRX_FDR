@@ -34,3 +34,4 @@ scan
 
 - market_scanner.py
 - chart_viewer.py
+- webapp/auto_publish.py
