@@ -35,6 +35,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 
 - 색상, 글꼴, 모서리: `.streamlit/config.toml` (프로젝트 폴더에서 `streamlit run`을 실행해야 적용)
 - 테마 설정으로 지정할 수 없는 사이드바 메뉴, 카드 등의 스타일: `webapp/theme.css`
+- 시작화면의 작업 진행 표시 상태 계산: `webapp/workflow.py` (공휴일은 구분하지 않음)
 
 ## 3. 의존 모듈
 

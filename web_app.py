@@ -32,7 +32,7 @@ from config import (
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
-from webapp import storage
+from webapp import storage, workflow
 
 
 st.set_page_config(
@@ -2302,6 +2302,7 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
                         "breakout_strength": row.get("breakout_strength"),
                         "volume_pct": row.get("volume_pct"),
                         "date": str(row.get("date", "")).strip(),
+                        "is_final": row.get("is_final"),
                     }
                 )
         except Exception as e:
@@ -2344,6 +2345,7 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
                         "breakout_strength": row.get("breakout_strength"),
                         "volume_pct": row.get("volume_pct"),
                         "date": row.get("date", ""),
+                        "is_final": row.get("is_final"),
                         "image_path": image_path if image_path and os.path.isfile(image_path) else None,
                     }
                 )
@@ -2385,6 +2387,18 @@ def _format_pct(value, digits: int = 2) -> str:
     if value is None or pd.isna(value):
         return "N/A"
     return f"{float(value):.{digits}f}%"
+
+
+def _bar_chips_html(bar_date: object, is_final: object) -> str:
+    chips = []
+    if str(bar_date or "").strip():
+        chips.append(f"<span class='chip'>봉 <b>{html.escape(str(bar_date))}</b></span>")
+    final_text = str(is_final).strip().lower()
+    if final_text == "true":
+        chips.append("<span class='chip chip-final'>확정 봉</span>")
+    elif final_text == "false":
+        chips.append("<span class='chip chip-open'>진행 중 봉</span>")
+    return "".join(chips)
 
 
 def _move_gallery(idx_key: str, delta: int, last_index: int, clicked_key: str, nonce_key: str) -> None:
@@ -2510,8 +2524,9 @@ def _render_case_gallery(
     vol_text = f"거래량 {_format_pct(selected.get('volume_pct'), digits=1)}"
     header_text = f"{code_text} | {name_text} | ▲ {pct_text} | {vol_text}"
     st.markdown(
-        "<div style='font-size:0.8rem; color:#5d6a7f; margin:0 0 6px 2px;'>{}</div>".format(
-            html.escape(header_text)
+        "<div class='gallery-head'><span>{}</span>{}</div>".format(
+            html.escape(header_text),
+            _bar_chips_html(selected.get("date"), selected.get("is_final")),
         ),
         unsafe_allow_html=True,
     )
@@ -2686,6 +2701,18 @@ def _format_scan_label(label: str) -> str:
     return f"{m[1]}-{m[2]}-{m[3]} {m[4]}:{m[5]}" if m else str(label)
 
 
+MENU_ICONS = {
+    START_MENU: ":material/home:",
+    "1. 데이터 저장": ":material/database:",
+    "2. 이평 돌파 종목 서칭": ":material/manage_search:",
+    "3. 서칭 데이터 조회": ":material/candlestick_chart:",
+    "4. 관심종목 서칭": ":material/search:",
+    "5. 관심종목 조회": ":material/star:",
+    "6. 패턴 데이터 입력": ":material/edit_note:",
+    "7. 패턴 데이터 조회": ":material/history:",
+    "8. 보유 종목 조회": ":material/account_balance_wallet:",
+}
+
 MENU_GROUPS = [
     (None, [START_MENU]),
     ("시세·스캔", ["1. 데이터 저장", "2. 이평 돌파 종목 서칭", "3. 서칭 데이터 조회"]),
@@ -2751,7 +2778,9 @@ for group_title, group_menus in MENU_GROUPS:
         st.sidebar.markdown(f"<div class='menu-group'>{group_title}</div>", unsafe_allow_html=True)
     for menu in group_menus:
         button_type = "primary" if st.session_state.selected_menu == menu else "secondary"
-        if st.sidebar.button(menu, key=f"menu_btn_{menu}", width="stretch", type=button_type):
+        if st.sidebar.button(
+            menu, key=f"menu_btn_{menu}", width="stretch", type=button_type, icon=MENU_ICONS[menu]
+        ):
             st.session_state.selected_menu = menu
             st.query_params["menu"] = str(MENU_ITEMS.index(menu))
             st.rerun()
@@ -2761,28 +2790,31 @@ if selected_menu in MENU_ITEMS:
     st.query_params["menu"] = str(MENU_ITEMS.index(selected_menu))
 st.session_state.show_intro = selected_menu == START_MENU
 
+def _render_workflow_steps(steps: list[dict]) -> None:
+    done_count = sum(step["state"] == workflow.DONE for step in steps)
+    cards = ""
+    for number, step in enumerate(steps, start=1):
+        mark = "✓" if step["state"] == workflow.DONE else number
+        cards += (
+            f"<a class='flow-step flow-{step['state']}' href='?menu={step['menu']}' target='_self'>"
+            f"<span class='flow-mark'>{mark}</span>"
+            f"<span><span class='flow-title'>{html.escape(step['title'])}</span>"
+            f"<span class='flow-detail'>{html.escape(step['detail'])}</span></span></a>"
+        )
+    st.markdown(
+        "<div class='flow-panel'>"
+        f"<div class='flow-head'><span>오늘의 작업</span><b>{done_count} / {len(steps)}</b></div>"
+        f"<div class='flow-steps'>{cards}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
 data_status = get_data_status(DATA_DIR)
 scan_status = get_scan_status(OUTPUT_DIR)
 
 if st.session_state.show_intro:
     st.title("KRX FDR")
-    st.markdown(
-        """
-<span class='flow-chip'>데이터 저장</span>
-<span class='flow-chip'>돌파 서칭</span>
-<span class='flow-chip'>결과 조회</span>
-<span class='flow-chip'>종목별 분석</span>
-""",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-1. 데이터 저장으로 최신 시세를 적재합니다.
-2. 이평 돌파 종목 서칭을 실행합니다.
-3. 서칭 데이터 조회에서 케이스별 결과를 검토합니다.
-4. 관심/기록/보유 종목 메뉴에서 데이터를 조회하고 저장합니다.
-"""
-    )
+    _render_workflow_steps(workflow.build_steps(data_status, scan_status, date.today()))
     st.markdown("#### 데이터 현황")
     intro_cards = [
         ("KOSPI 종목 수", f"{data_status['kospi_count']:,}"),
@@ -2804,10 +2836,10 @@ else:
     with head_right:
         st.markdown(
             "<div class='status-strip'>"
-            f"<span>데이터 <b>{data_status['latest_collection_date'] or '미확인'}</b></span>"
-            f"<span>파일 <b>{data_status['daily_file_count']:,}개</b></span>"
-            f"<span>스캔 <b>{_format_scan_label(scan_status['latest_scan_label'])}</b></span>"
-            f"<span>돌파 <b>{scan_status['total_breakouts']:,}건</b></span>"
+            f"<span class='chip'>데이터 <b>{data_status['latest_collection_date'] or '미확인'}</b></span>"
+            f"<span class='chip'>파일 <b>{data_status['daily_file_count']:,}개</b></span>"
+            f"<span class='chip'>스캔 <b>{_format_scan_label(scan_status['latest_scan_label'])}</b></span>"
+            f"<span class='chip'>돌파 <b>{scan_status['total_breakouts']:,}건</b></span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -2840,10 +2872,18 @@ else:
         else:
             st.warning("스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
 
-if st.session_state.show_intro and scan_status["case_counts"]:
-    st.markdown("### 케이스별 돌파 건수")
-    case_df = pd.DataFrame(scan_status["case_counts"])
-    st.dataframe(case_df, width="stretch", hide_index=True)
+if st.session_state.show_intro:
+    list_col, case_col = st.columns([1.2, 1], gap="large")
+    with list_col:
+        st.markdown("#### 다른 기능")
+        with st.container(border=True):
+            for menu in ["4. 관심종목 서칭", "5. 관심종목 조회", "6. 패턴 데이터 입력", "7. 패턴 데이터 조회", "8. 보유 종목 조회"]:
+                st.markdown(f"{MENU_ICONS[menu]} **{menu}**  \n:gray[{FEATURE_HELP[menu]}]")
+    with case_col:
+        if scan_status["case_counts"]:
+            st.markdown("#### 케이스별 돌파 건수")
+            case_df = pd.DataFrame(scan_status["case_counts"])
+            st.dataframe(case_df, width="stretch", hide_index=True)
 
 if not st.session_state.show_intro:
     if selected_menu == "1. 데이터 저장":
