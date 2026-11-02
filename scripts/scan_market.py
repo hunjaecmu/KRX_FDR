@@ -15,6 +15,7 @@ from market_scanner import (
 )
 
 from chart_viewer import show_breakout_charts
+from webapp import auto_publish
 
 
 def main():
@@ -26,6 +27,8 @@ def main():
     folder = save_scan_results_to_csv(results)
 
     show_breakout_charts(results, save_root=folder)
+
+    auto_publish.publish_after("스캔")
 
 
 if __name__ == "__main__":

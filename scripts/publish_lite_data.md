@@ -16,7 +16,14 @@ Streamlit Community Cloud에 배포한 경량 버전이 사용할 데이터 묶�
 
 ## 3. 실행
 
-전체 업데이트와 스캔을 마친 뒤 실행합니다.
+다음 작업이 성공적으로 끝나면 자동으로 실행됩니다.
+
+- 전체 데이터 업데이트 (웹 앱의 전체 업데이트, `scripts/update_data.py`)
+- 스캔 (웹 앱의 2번 메뉴, `scan.cmd`, `scripts/scan_market.py`)
+
+시장별 업데이트에서는 실행되지 않습니다. 환경변수가 없으면 건너뛰고, 업로드에 실패해도 앞선 작업은 성공으로 끝납니다.
+
+직접 실행하려면:
 
 ```bash
 python scripts/publish_lite_data.py

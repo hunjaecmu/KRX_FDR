@@ -34,7 +34,13 @@ def main() -> None:
         return
 
     print(f"{repo} 업로드 시작")
-    url = lite_data.upload_bundle(bundle_path, repo, token)
+    url = lite_data.upload_bundle(
+        bundle_path,
+        repo,
+        token,
+        api=os.getenv("KRX_DATA_API") or lite_data.DEFAULT_API,
+        uploads=os.getenv("KRX_DATA_UPLOADS") or lite_data.DEFAULT_UPLOADS,
+    )
     print(f"업로드 완료: {url}")
 
 

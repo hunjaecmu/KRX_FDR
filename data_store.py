@@ -1042,3 +1042,8 @@ if __name__ == "__main__":
         derive_all=True,
         markets=sys.argv[1:] or None,
     )
+
+    from webapp import auto_publish
+
+    if auto_publish.is_full_update(sys.argv[1:]):
+        auto_publish.publish_after("전체 데이터 업데이트")

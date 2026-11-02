@@ -11,6 +11,7 @@
 2. 콘솔 출력 (`print_scan_results`)
 3. CSV 저장 (`save_scan_results_to_csv`)
 4. 차트 표시/저장 (`show_breakout_charts`)
+5. 서버용 데이터 묶음 업로드 (`webapp/auto_publish.py`, 환경변수가 있을 때)
 
 ## 2. 사용 시점
 
