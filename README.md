@@ -200,6 +200,7 @@ python web_app_lite.py
 
 - 메뉴 5~8번과 저장 기능이 없고 어두운 터미널 테마를 사용합니다.
 - 기본 포트는 8502이며 전체 버전과 같은 데이터를 사용합니다.
+- Streamlit Community Cloud 배포는 `lite/streamlit_app.py`를 진입점으로 사용합니다. 데이터 전달은 `scripts/publish_lite_data.md`를 참고하세요.
 
 ## 문서
 
