@@ -243,20 +243,32 @@ class CloudEditionTests(SourceDataTestCase):
             [b.label for b in at.sidebar.button], ["시작화면", "돌파 종목 조회", "종목 차트 조회", "주요 종목"]
         )
 
-        fig = plt.figure(figsize=(0.2, 0.2))
-        chart = mock.Mock(return_value=(fig, pd.Timestamp("2026-11-06")))
+        bars = pd.DataFrame({
+            "date": pd.to_datetime(["2026-10-30", "2026-11-06"]),
+            "open": [1.0, 2.0], "high": [3.0, 4.0], "low": [1.0, 1.0], "close": [2.0, 3.0], "volume": [10, 20],
+        })
+        loads = []
+
+        def recording_loader(timeframe):
+            def load(code):
+                loads.append((code, timeframe))
+                return bars
+            return load
+
         with mock.patch.dict(os.environ, env), \
                 mock.patch("config.DATA_DIR", self.dst_data), \
                 mock.patch("config.OUTPUT_DIR", self.dst_output), \
                 mock.patch.object(lite_data, "ensure_data", return_value=False), \
-                mock.patch("historical_chart_viewer.build_historical_chart_figure", chart):
+                mock.patch("data_loader.load_weekly", recording_loader("weekly")), \
+                mock.patch("data_loader.load_monthly", recording_loader("monthly")):
             at = AppTest.from_file(os.path.join(ROOT, "lite", "streamlit_app.py"), default_timeout=60)
             at.query_params["menu"] = "9"
             at.run()
             self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
             # 메뉴에 들어오면 KOSPI 주봉과 지수 요약이 바로 보인다.
-            self.assertEqual(chart.call_args.kwargs["code"], "KS11")
-            self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+            self.assertEqual(loads[-1], ("KS11", "weekly"))
+            self.assertEqual(len(at.get("iframe")), 1)
+            self.assertEqual(len(at.get("imgs")), 0)
             labels = [b.label for b in at.main.button]
             self.assertEqual(labels, ["KOSPI", "KOSDAQ", "삼성전자", "SK하이닉스", "삼성전기"])
             summary_html = " ".join(m.value for m in at.markdown)
@@ -265,26 +277,22 @@ class CloudEditionTests(SourceDataTestCase):
             self.assertIn("-1.50%", summary_html)
 
             at.button(key="major_stock_009150").click().run()
-            self.assertEqual(chart.call_args.kwargs["code"], "009150")
-            self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+            self.assertEqual(loads[-1], ("009150", "weekly"))
             self.assertEqual(at.button(key="major_stock_009150").proto.type, "primary")
 
             at.radio(key="major_timeframe").set_value("월봉").run()
-            self.assertEqual(chart.call_args.kwargs["code"], "009150")
-            self.assertEqual(chart.call_args.kwargs["timeframe"], "monthly")
+            self.assertEqual(loads[-1], ("009150", "monthly"))
 
             # 다른 항목을 고르면 주봉으로 돌아간다.
             at.button(key="major_stock_KQ11").click().run()
-            self.assertEqual(chart.call_args.kwargs["code"], "KQ11")
-            self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+            self.assertEqual(loads[-1], ("KQ11", "weekly"))
 
             # 메뉴를 다시 고르면 KOSPI 주봉부터 보여 준다.
             at.radio(key="major_timeframe").set_value("월봉").run()
             at.button(key="menu_btn_시작화면").click().run()
             at.button(key="menu_btn_주요 종목").click().run()
         self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
-        self.assertEqual(chart.call_args.kwargs["code"], "KS11")
-        self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+        self.assertEqual(loads[-1], ("KS11", "weekly"))
 
 
 if __name__ == "__main__":

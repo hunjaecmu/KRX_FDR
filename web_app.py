@@ -40,6 +40,8 @@ from webapp import lite_data, storage, thumbnails, tv_chart, workflow
 
 CLOUD_EDITION = os.getenv("KRX_APP_EDITION") == "cloud"
 LITE_EDITION = CLOUD_EDITION or os.getenv("KRX_APP_EDITION") == "lite"
+# 로컬 경량 버전만 이미지 차트를 쓰고, 메인과 서버 버전은 대화형 차트를 쓴다.
+INTERACTIVE_CHART = CLOUD_EDITION or not LITE_EDITION
 
 st.set_page_config(
     page_title="KRX FDR Lite" if LITE_EDITION else "KRX FDR Dashboard",
@@ -1383,9 +1385,9 @@ def _build_stock_chart(
     origin_date_text: Optional[str] = None,
     buy_price: Optional[float] = None,
 ):
-    """차트를 준비해 (표시 함수, 기준봉 날짜)를 돌려준다. 메인은 대화형, 경량과 서버는 이미지 차트를 쓴다."""
+    """차트를 준비해 (표시 함수, 기준봉 날짜)를 돌려준다."""
     target_date = pd.to_datetime(target_date_text)
-    if LITE_EDITION:
+    if not INTERACTIVE_CHART:
         fig, anchor_date = build_historical_chart_figure(
             code=code, name=name, timeframe=timeframe, target_date=target_date, lookback_bars=LOOKBACK_BARS
         )
@@ -1423,7 +1425,7 @@ def _build_stock_chart(
         price_lines=price_lines,
         marker_date=marker_date,
     )
-    chart_html = tv_chart.render_html(payload)
+    chart_html = tv_chart.render_html(payload, theme=tv_chart.DARK_THEME if LITE_EDITION else tv_chart.LIGHT_THEME)
     return (lambda: components.html(chart_html, height=tv_chart.CHART_HEIGHT)), pd.to_datetime(payload["anchor"])
 
 
@@ -2396,19 +2398,18 @@ def _render_major_stocks() -> None:
     timeframe = "weekly" if timeframe_label == "주봉" else "monthly"
     try:
         # 진행 중인 봉은 이번 주 금요일이나 이번 달 말일 날짜이므로 기준일을 뒤로 잡아 최신 봉까지 포함한다.
-        fig, anchor_date = build_historical_chart_figure(
-            code=selected_code,
-            name=name,
-            timeframe=timeframe,
-            target_date=pd.Timestamp(date.today()) + pd.Timedelta(days=40),
-            lookback_bars=LOOKBACK_BARS,
+        show_chart, anchor_date = _build_stock_chart(
+            selected_code,
+            name,
+            timeframe,
+            (pd.Timestamp(date.today()) + pd.Timedelta(days=40)).strftime("%Y-%m-%d"),
         )
     except Exception as e:
         st.error(f"{name} 차트를 불러오지 못했습니다: {e}")
         return
 
     st.caption(f"{name} ({selected_code}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | {timeframe_label} {LOOKBACK_BARS}봉")
-    st.pyplot(fig, width="stretch")
+    show_chart()
 
 
 def _select_review_case(case_key: str) -> None:
@@ -2534,8 +2535,8 @@ def _render_case_gallery(
         unsafe_allow_html=True,
     )
     try:
-        if LITE_EDITION:
-            raise ValueError("경량과 서버 버전은 저장된 차트 이미지를 사용합니다.")
+        if not INTERACTIVE_CHART:
+            raise ValueError("로컬 경량 버전은 저장된 차트 이미지를 사용합니다.")
         show_review_chart, _ = _build_stock_chart(
             code_text,
             name_text,

@@ -42,8 +42,8 @@ class BuildPayloadTests(unittest.TestCase):
 
     def test_volume_color_follows_candle_direction(self):
         volumes = self.payload()["volumes"]
-        self.assertEqual(volumes[0]["color"], tv_chart.UP_COLOR)
-        self.assertEqual(volumes[1]["color"], tv_chart.DOWN_COLOR)
+        self.assertTrue(volumes[0]["rising"])
+        self.assertFalse(volumes[1]["rising"])
 
     def test_moving_average_skips_missing_values(self):
         moving_averages = self.payload()["moving_averages"]
@@ -64,6 +64,12 @@ class RenderHtmlTests(unittest.TestCase):
         rendered = tv_chart.render_html(payload)
         self.assertNotIn("</script><b>x", rendered)
         self.assertIn("LightweightCharts", rendered)
+
+    def test_dark_theme_colors_are_used(self):
+        payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2)
+        rendered = tv_chart.render_html(payload, theme=tv_chart.DARK_THEME)
+        self.assertIn("background: #0d1117", rendered)
+        self.assertIn(tv_chart.DARK_THEME["up"], rendered)
 
     def test_attribution_logo_stays_on(self):
         payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2)
