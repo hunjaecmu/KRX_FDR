@@ -68,6 +68,13 @@ class LiteEditionTests(unittest.TestCase):
         self.assertFalse(any(label[0] in "5678" for label in labels))
         self.assertIn("4. 종목 차트 조회", labels)
 
+    def test_start_screen_explains_available_data(self):
+        at = self.run_app("0")
+        text = " ".join(m.value for m in at.markdown)
+        self.assertIn("돌파 조건", text)
+        self.assertIn("52봉", text)
+        self.assertTrue(any("실시간 시세가 아니며" in c.value for c in at.caption))
+
     def test_removed_menu_address_falls_back_to_start(self):
         at = self.run_app("8")
         self.assertEqual(at.session_state["selected_menu"], "시작화면")
