@@ -192,6 +192,15 @@ pip install streamlit
 streamlit run web_app.py
 ```
 
+6. 조회 전용 경량 버전 실행(선택)
+
+```bash
+python web_app_lite.py
+```
+
+- 메뉴 5~8번과 저장 기능이 없고 어두운 터미널 테마를 사용합니다.
+- 기본 포트는 8502이며 전체 버전과 같은 데이터를 사용합니다.
+
 ## 문서
 
 모듈별 상세 문서:

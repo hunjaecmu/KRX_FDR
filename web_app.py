@@ -32,11 +32,13 @@ from config import (
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
-from webapp import storage, workflow
+from webapp import storage, thumbnails, workflow
 
+
+LITE_EDITION = os.getenv("KRX_APP_EDITION") == "lite"
 
 st.set_page_config(
-    page_title="KRX FDR Dashboard",
+    page_title="KRX FDR Lite" if LITE_EDITION else "KRX FDR Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -577,6 +579,9 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
         )
         st.pyplot(fig, width="stretch")
+
+        if LITE_EDITION:
+            return
 
         st.markdown("---")
         st.markdown(f"#### {panel_title}")
@@ -2383,6 +2388,11 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
     }
 
 
+@st.cache_data(show_spinner=False)
+def _dark_thumbnail(image_path: str) -> str:
+    return thumbnails.dark_thumbnail_data_uri(image_path)
+
+
 def _format_pct(value, digits: int = 2) -> str:
     if value is None or pd.isna(value):
         return "N/A"
@@ -2536,69 +2546,73 @@ def _render_case_gallery(
         f"돌파율 {pct_text} | {vol_text}"
     )
 
-    st.markdown("#### 관심종목 저장")
-    save_col1, save_col2 = st.columns([1.1, 1.9])
-    classification_options = ["10이평", "120이평", "180이평", "240이평"]
-    default_classification = _default_classification_from_case_key(case_key)
-    default_classification_idx = (
-        classification_options.index(default_classification)
-        if default_classification in classification_options
-        else 0
-    )
-    with save_col1:
-        classification = st.selectbox(
-            "분류",
-            options=classification_options,
-            index=default_classification_idx,
-            key=f"review_interest_classification_{case_key}",
+    if not LITE_EDITION:
+        st.markdown("#### 관심종목 저장")
+        save_col1, save_col2 = st.columns([1.1, 1.9])
+        classification_options = ["10이평", "120이평", "180이평", "240이평"]
+        default_classification = _default_classification_from_case_key(case_key)
+        default_classification_idx = (
+            classification_options.index(default_classification)
+            if default_classification in classification_options
+            else 0
         )
-    with save_col2:
-        memo_text = st.text_input(
-            "메모",
-            value="",
-            key=f"review_interest_memo_{case_key}_{code_text}",
-        )
-        current_watch_path = storage.interest_watch_monthly_path()
-        st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
-
-    can_save = bool(code_text)
-    if not can_save:
-        st.warning("종목코드가 없어 저장할 수 없습니다.")
-
-    if st.button(
-        "현재 확대 종목 관심저장",
-        width="stretch",
-        key=f"review_interest_save_{case_key}",
-        disabled=not can_save,
-    ):
-        try:
-            timeframe = _infer_timeframe_from_case_key(case_key)
-            target_date_text = str(selected.get("date", "")).strip()
-            target_date = pd.to_datetime(target_date_text) if target_date_text else pd.Timestamp(date.today())
-
-            snap_date, snap_close = _extract_last_bar_snapshot(
-                code=code_text,
-                timeframe=timeframe,
-                target_date=target_date,
+        with save_col1:
+            classification = st.selectbox(
+                "분류",
+                options=classification_options,
+                index=default_classification_idx,
+                key=f"review_interest_classification_{case_key}",
             )
+        with save_col2:
+            memo_text = st.text_input(
+                "메모",
+                value="",
+                key=f"review_interest_memo_{case_key}_{code_text}",
+            )
+            current_watch_path = storage.interest_watch_monthly_path()
+            st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
 
-            row = {
-                "종목명": name_text,
-                "종목코드": code_text,
-                "종목의 마지막 봉의 날짜": snap_date.strftime("%Y-%m-%d"),
-                "주봉 or 월봉 선택": "주봉" if timeframe == "weekly" else "월봉",
-                "현시점 종가": f"{snap_close:.2f}",
-                "분류": classification,
-                "메모": memo_text,
-            }
-            target_watch_path = storage.interest_watch_monthly_path()
-            storage.append_row(target_watch_path, row)
-            st.success(f"저장 완료: {target_watch_path}")
-        except Exception as save_e:
-            st.error(f"저장 실패: {save_e}")
+        can_save = bool(code_text)
+        if not can_save:
+            st.warning("종목코드가 없어 저장할 수 없습니다.")
+
+        if st.button(
+            "현재 확대 종목 관심저장",
+            width="stretch",
+            key=f"review_interest_save_{case_key}",
+            disabled=not can_save,
+        ):
+            try:
+                timeframe = _infer_timeframe_from_case_key(case_key)
+                target_date_text = str(selected.get("date", "")).strip()
+                target_date = pd.to_datetime(target_date_text) if target_date_text else pd.Timestamp(date.today())
+
+                snap_date, snap_close = _extract_last_bar_snapshot(
+                    code=code_text,
+                    timeframe=timeframe,
+                    target_date=target_date,
+                )
+
+                row = {
+                    "종목명": name_text,
+                    "종목코드": code_text,
+                    "종목의 마지막 봉의 날짜": snap_date.strftime("%Y-%m-%d"),
+                    "주봉 or 월봉 선택": "주봉" if timeframe == "weekly" else "월봉",
+                    "현시점 종가": f"{snap_close:.2f}",
+                    "분류": classification,
+                    "메모": memo_text,
+                }
+                target_watch_path = storage.interest_watch_monthly_path()
+                storage.append_row(target_watch_path, row)
+                st.success(f"저장 완료: {target_watch_path}")
+            except Exception as save_e:
+                st.error(f"저장 실패: {save_e}")
 
     thumb_items = gallery_items
-    thumb_images = [item["image_path"] for item in thumb_items]
+    if LITE_EDITION:
+        thumb_images = [_dark_thumbnail(item["image_path"]) for item in thumb_items]
+    else:
+        thumb_images = [item["image_path"] for item in thumb_items]
     thumb_captions = []
     for item in thumb_items:
         thumb_code = str(item.get("code", "")).strip()
@@ -2648,7 +2662,7 @@ def _render_case_gallery(
 
 START_MENU = "시작화면"
 
-MENU_ITEMS = [
+FULL_MENU_ITEMS = [
     START_MENU,
     "1. 데이터 저장",
     "2. 이평 돌파 종목 서칭",
@@ -2659,6 +2673,8 @@ MENU_ITEMS = [
     "7. 패턴 데이터 조회",
     "8. 보유 종목 조회",
 ]
+
+MENU_ITEMS = FULL_MENU_ITEMS[:5] if LITE_EDITION else FULL_MENU_ITEMS
 
 REVIEW_CASE_ORDER = [
     "weekly_ma10_breakout",
@@ -2720,6 +2736,20 @@ MENU_GROUPS = [
     ("보유", ["8. 보유 종목 조회"]),
 ]
 
+LITE_MENU_GROUPS = [
+    (None, [START_MENU]),
+    ("시세·스캔", ["1. 데이터 저장", "2. 이평 돌파 종목 서칭", "3. 서칭 데이터 조회"]),
+    ("종목", ["4. 관심종목 서칭"]),
+]
+
+# 경량 버전은 저장 기능이 없어 4번 메뉴를 차트 조회로 표시한다.
+LITE_MENU_LABELS = {"4. 관심종목 서칭": "4. 종목 차트 조회"}
+
+
+def _menu_label(menu: str) -> str:
+    return LITE_MENU_LABELS.get(menu, menu) if LITE_EDITION else menu
+
+
 FEATURE_HELP = {
     "1. 데이터 저장": "KRX 일봉/주봉/월봉 데이터 적재와 갱신을 실행합니다.",
     "2. 이평 돌파 종목 서칭": "주/월봉 이평선 돌파 종목을 스캔합니다.",
@@ -2730,9 +2760,14 @@ FEATURE_HELP = {
     "7. 패턴 데이터 조회": "저장된 패턴(기록) 데이터를 조회합니다.",
     "8. 보유 종목 조회": "보유 종목 데이터를 조회합니다.",
 }
+if LITE_EDITION:
+    FEATURE_HELP["4. 관심종목 서칭"] = "개별 종목의 주봉/월봉 차트를 조회합니다."
 
 with open(os.path.join(os.path.dirname(storage.__file__), "theme.css"), encoding="utf-8") as _theme_file:
     st.markdown(f"<style>{_theme_file.read()}</style>", unsafe_allow_html=True)
+if LITE_EDITION:
+    with open(os.path.join(os.path.dirname(storage.__file__), "theme_lite.css"), encoding="utf-8") as _lite_file:
+        st.markdown(f"<style>{_lite_file.read()}</style>", unsafe_allow_html=True)
 
 
 if "show_intro" not in st.session_state:
@@ -2772,14 +2807,14 @@ if "data_store_progress_value" not in st.session_state:
 if "data_store_progress_text" not in st.session_state:
     st.session_state.data_store_progress_text = "데이터 업데이트 대기 중"
 
-st.sidebar.markdown("### KRX FDR")
-for group_title, group_menus in MENU_GROUPS:
+st.sidebar.markdown("### KRX FDR Lite" if LITE_EDITION else "### KRX FDR")
+for group_title, group_menus in LITE_MENU_GROUPS if LITE_EDITION else MENU_GROUPS:
     if group_title:
         st.sidebar.markdown(f"<div class='menu-group'>{group_title}</div>", unsafe_allow_html=True)
     for menu in group_menus:
         button_type = "primary" if st.session_state.selected_menu == menu else "secondary"
         if st.sidebar.button(
-            menu, key=f"menu_btn_{menu}", width="stretch", type=button_type, icon=MENU_ICONS[menu]
+            _menu_label(menu), key=f"menu_btn_{menu}", width="stretch", type=button_type, icon=MENU_ICONS[menu]
         ):
             st.session_state.selected_menu = menu
             st.query_params["menu"] = str(MENU_ITEMS.index(menu))
@@ -2813,7 +2848,7 @@ data_status = get_data_status(DATA_DIR)
 scan_status = get_scan_status(OUTPUT_DIR)
 
 if st.session_state.show_intro:
-    st.title("KRX FDR")
+    st.title("KRX FDR Lite" if LITE_EDITION else "KRX FDR")
     _render_workflow_steps(workflow.build_steps(data_status, scan_status, date.today()))
     st.markdown("#### 데이터 현황")
     intro_cards = [
@@ -2832,7 +2867,7 @@ if st.session_state.show_intro:
 else:
     head_left, head_right = st.columns([1, 1.4])
     with head_left:
-        st.subheader(selected_menu)
+        st.subheader(_menu_label(selected_menu))
     with head_right:
         st.markdown(
             "<div class='status-strip'>"
@@ -2877,12 +2912,15 @@ else:
             st.warning("스캔 결과가 없습니다. 지금 스캔 실행이 필요합니다.")
 
 if st.session_state.show_intro:
-    list_col, case_col = st.columns([1.2, 1], gap="large")
-    with list_col:
-        st.markdown("#### 다른 기능")
-        with st.container(border=True):
-            for menu in ["4. 관심종목 서칭", "5. 관심종목 조회", "6. 패턴 데이터 입력", "7. 패턴 데이터 조회", "8. 보유 종목 조회"]:
-                st.markdown(f"{MENU_ICONS[menu]} **{menu}**  \n:gray[{FEATURE_HELP[menu]}]")
+    if LITE_EDITION:
+        case_col = st.container()
+    else:
+        list_col, case_col = st.columns([1.2, 1], gap="large")
+        with list_col:
+            st.markdown("#### 다른 기능")
+            with st.container(border=True):
+                for menu in ["4. 관심종목 서칭", "5. 관심종목 조회", "6. 패턴 데이터 입력", "7. 패턴 데이터 조회", "8. 보유 종목 조회"]:
+                    st.markdown(f"{MENU_ICONS[menu]} **{menu}**  \n:gray[{FEATURE_HELP[menu]}]")
     with case_col:
         if scan_status["case_counts"]:
             st.markdown("#### 케이스별 돌파 건수")
