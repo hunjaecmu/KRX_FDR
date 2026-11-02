@@ -21,6 +21,25 @@ MA_COLORS = {
 UP_COLOR = "#e53935"
 DOWN_COLOR = "#1e63d0"
 
+LIGHT_THEME = {
+    "background": "#ffffff",
+    "text": "#14213d",
+    "grid": "#eeece5",
+    "border": "#dddbd2",
+    "guide": "#14213d",
+    "up": UP_COLOR,
+    "down": DOWN_COLOR,
+}
+DARK_THEME = {
+    "background": "#0d1117",
+    "text": "#e6edf3",
+    "grid": "#21262d",
+    "border": "#30363d",
+    "guide": "#e6edf3",
+    "up": "#f85149",
+    "down": "#58a6ff",
+}
+
 
 def build_payload(
     df: pd.DataFrame,
@@ -46,7 +65,7 @@ def build_payload(
     volumes = []
     if "volume" in work.columns:
         volumes = [
-            {"time": t, "value": float(v), "color": UP_COLOR if c >= o else DOWN_COLOR}
+            {"time": t, "value": float(v), "rising": bool(c >= o)}
             for t, v, c, o in zip(times, work["volume"].fillna(0), work["close"], work["open"])
         ]
     moving_averages = {}
@@ -75,8 +94,6 @@ def build_payload(
         "visible_bars": int(visible_bars),
         "price_lines": price_lines or [],
         "markers": markers,
-        "up_color": UP_COLOR,
-        "down_color": DOWN_COLOR,
     }
 
 
@@ -84,34 +101,36 @@ def _json_for_script(value: dict) -> str:
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
 
 
-def render_html(payload: dict, height: int = CHART_HEIGHT) -> str:
+def render_html(payload: dict, height: int = CHART_HEIGHT, theme: Optional[dict] = None) -> str:
+    theme = theme or LIGHT_THEME
     with open(VENDOR_JS, encoding="utf-8") as f:
         library = f.read()
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>
-html, body {{ margin: 0; height: 100%; background: #ffffff; font-family: "Pretendard Variable", "Malgun Gothic", sans-serif; }}
+html, body {{ margin: 0; height: 100%; background: {theme["background"]}; font-family: "Pretendard Variable", "Malgun Gothic", sans-serif; }}
 #chart {{ position: relative; width: 100%; height: {height}px; }}
-#legend {{ position: absolute; top: 6px; left: 8px; z-index: 3; font-size: 12px; line-height: 1.5; color: #14213d; pointer-events: none; }}
+#legend {{ position: absolute; top: 6px; left: 8px; z-index: 3; font-size: 12px; line-height: 1.5; color: {theme["text"]}; pointer-events: none; max-width: calc(100% - 100px); }}
 #legend b {{ font-size: 13px; font-weight: 600; }}
-#legend span {{ margin-right: 8px; white-space: nowrap; }}
+#legend span {{ margin-right: 8px; white-space: nowrap; display: inline-block; }}
 </style></head><body><div id="chart"><div id="legend"></div></div>
 <script>{library}</script>
 <script>
 const P = {_json_for_script(payload)};
+const T = {_json_for_script(theme)};
 const L = LightweightCharts;
 const container = document.getElementById("chart");
 const legend = document.getElementById("legend");
 const chart = L.createChart(container, {{
   autoSize: true,
-  layout: {{ background: {{ color: "#ffffff" }}, textColor: "#14213d", attributionLogo: true }},
-  grid: {{ vertLines: {{ color: "#eeece5" }}, horzLines: {{ color: "#eeece5" }} }},
+  layout: {{ background: {{ color: T.background }}, textColor: T.text, attributionLogo: true, panes: {{ separatorColor: T.border }} }},
+  grid: {{ vertLines: {{ color: T.grid }}, horzLines: {{ color: T.grid }} }},
   crosshair: {{ mode: L.CrosshairMode.Normal }},
-  rightPriceScale: {{ borderColor: "#dddbd2" }},
-  timeScale: {{ borderColor: "#dddbd2", rightOffset: 3 }},
+  rightPriceScale: {{ borderColor: T.border }},
+  timeScale: {{ borderColor: T.border, rightOffset: 3 }},
   localization: {{ priceFormatter: p => p.toLocaleString("ko-KR", {{ maximumFractionDigits: 2 }}) }},
 }});
 const candles = chart.addSeries(L.CandlestickSeries, {{
-  upColor: P.up_color, downColor: P.down_color, wickUpColor: P.up_color, wickDownColor: P.down_color, borderVisible: false,
+  upColor: T.up, downColor: T.down, wickUpColor: T.up, wickDownColor: T.down, borderVisible: false,
 }});
 candles.setData(P.candles);
 const maSeries = {{}};
@@ -123,15 +142,15 @@ for (const [name, ma] of Object.entries(P.moving_averages)) {{
 let volumeSeries = null;
 if (P.volumes.length) {{
   volumeSeries = chart.addSeries(L.HistogramSeries, {{ priceFormat: {{ type: "volume" }}, priceLineVisible: false, lastValueVisible: false }}, 1);
-  volumeSeries.setData(P.volumes);
+  volumeSeries.setData(P.volumes.map(v => ({{ time: v.time, value: v.value, color: v.rising ? T.up : T.down }})));
   chart.panes()[0].setStretchFactor(4);
   chart.panes()[1].setStretchFactor(1);
 }}
 for (const item of P.price_lines) {{
-  candles.createPriceLine({{ price: item.price, color: item.color || "#14213d", lineWidth: 1, lineStyle: L.LineStyle.Solid, axisLabelVisible: true, title: item.title || "" }});
+  candles.createPriceLine({{ price: item.price, color: item.color || T.guide, lineWidth: 1, lineStyle: L.LineStyle.Solid, axisLabelVisible: true, title: item.title || "" }});
 }}
 if (P.markers.length) {{
-  L.createSeriesMarkers(candles, P.markers.map(m => ({{ time: m.time, position: "aboveBar", color: "#14213d", shape: "arrowDown", text: m.text }})));
+  L.createSeriesMarkers(candles, P.markers.map(m => ({{ time: m.time, position: "aboveBar", color: T.guide, shape: "arrowDown", text: m.text }})));
 }}
 const fmt = v => v === undefined || v === null ? "-" : v.toLocaleString("ko-KR", {{ maximumFractionDigits: 2 }});
 const addSpan = (text, color) => {{
@@ -152,7 +171,7 @@ function showLegend(bar, volume, maValue) {{
     addSpan("시 " + fmt(bar.open));
     addSpan("고 " + fmt(bar.high));
     addSpan("저 " + fmt(bar.low));
-    addSpan("종 " + fmt(bar.close), up ? P.up_color : P.down_color);
+    addSpan("종 " + fmt(bar.close), up ? T.up : T.down);
     addSpan("거래량 " + fmt(volume));
     legend.appendChild(document.createElement("br"));
   }}
@@ -174,5 +193,13 @@ chart.subscribeCrosshairMove(param => {{
   }});
 }});
 const count = P.candles.length;
-chart.timeScale().setVisibleLogicalRange({{ from: Math.max(0, count - P.visible_bars), to: count + 2 }});
+// iframe 크기가 잡히기 전에 구간을 지정하면 전체 기간으로 펼쳐지므로, 크기가 잡힌 뒤 처음 한 번만 적용한다.
+let rangeApplied = false;
+const applyInitialRange = () => {{
+  if (rangeApplied || container.clientWidth === 0) return;
+  rangeApplied = true;
+  requestAnimationFrame(() => chart.timeScale().setVisibleLogicalRange({{ from: Math.max(0, count - P.visible_bars), to: count + 2 }}));
+}};
+new ResizeObserver(applyInitialRange).observe(container);
+applyInitialRange();
 </script></body></html>"""
