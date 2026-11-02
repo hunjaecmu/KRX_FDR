@@ -44,6 +44,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 - [config.py](config.py)
 - [data_loader.py](data_loader.py)
 - [historical_chart_viewer.py](historical_chart_viewer.py)
+- [webapp/storage.py](webapp/storage.py) (CSV 읽기/쓰기, [문서](webapp/storage.md))
 
 사용하는 config 상수:
 
