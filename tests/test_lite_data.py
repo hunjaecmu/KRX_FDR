@@ -240,7 +240,7 @@ class CloudEditionTests(SourceDataTestCase):
             at = AppTest.from_file(os.path.join(ROOT, "lite", "streamlit_app.py"), default_timeout=60).run()
         self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
         self.assertEqual(
-            [b.label for b in at.sidebar.button], ["시작화면", "돌파 종목 조회", "종목 차트 조회", "주요 종목"]
+            [b.label for b in at.sidebar.button], ["시작화면", "돌파 종목 조회", "종목 차트 조회", "주요 종목", "사용 가이드"]
         )
 
         bars = pd.DataFrame({

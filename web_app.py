@@ -35,7 +35,7 @@ from config import (
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
 from webapp import data_status as data_status_module
-from webapp import lite_data, storage, thumbnails, tv_chart, workflow
+from webapp import lite_data, storage, thumbnails, tv_chart, user_guide, workflow
 
 
 CLOUD_EDITION = os.getenv("KRX_APP_EDITION") == "cloud"
@@ -2667,6 +2667,8 @@ def _render_case_gallery(
 
 START_MENU = "시작화면"
 MAJOR_STOCKS_MENU = "주요 종목"
+GUIDE_MENU = "사용 가이드"
+GUIDE_HEIGHT = 900
 MAJOR_STOCKS = [
     ("005930", "삼성전자"),
     ("000660", "SK하이닉스"),
@@ -2684,14 +2686,15 @@ FULL_MENU_ITEMS = [
     "7. 패턴 데이터 조회",
     "8. 보유 종목 조회",
     MAJOR_STOCKS_MENU,
+    GUIDE_MENU,
 ]
 
 if CLOUD_EDITION:
-    MENU_ITEMS = [START_MENU, "3. 서칭 데이터 조회", "4. 관심종목 서칭", MAJOR_STOCKS_MENU]
+    MENU_ITEMS = [START_MENU, "3. 서칭 데이터 조회", "4. 관심종목 서칭", MAJOR_STOCKS_MENU, GUIDE_MENU]
 elif LITE_EDITION:
-    MENU_ITEMS = FULL_MENU_ITEMS[:5]
+    MENU_ITEMS = FULL_MENU_ITEMS[:5] + [GUIDE_MENU]
 else:
-    MENU_ITEMS = FULL_MENU_ITEMS[:9]
+    MENU_ITEMS = FULL_MENU_ITEMS[:9] + [GUIDE_MENU]
 
 REVIEW_CASE_ORDER = [
     "weekly_ma10_breakout",
@@ -2745,6 +2748,7 @@ MENU_ICONS = {
     "7. 패턴 데이터 조회": ":material/history:",
     "8. 보유 종목 조회": ":material/account_balance_wallet:",
     MAJOR_STOCKS_MENU: ":material/star:",
+    GUIDE_MENU: ":material/menu_book:",
 }
 
 MENU_GROUPS = [
@@ -2752,17 +2756,20 @@ MENU_GROUPS = [
     ("시세·스캔", ["1. 데이터 저장", "2. 이평 돌파 종목 서칭", "3. 서칭 데이터 조회"]),
     ("관심·패턴", ["4. 관심종목 서칭", "5. 관심종목 조회", "6. 패턴 데이터 입력", "7. 패턴 데이터 조회"]),
     ("보유", ["8. 보유 종목 조회"]),
+    ("도움말", [GUIDE_MENU]),
 ]
 
 LITE_MENU_GROUPS = [
     (None, [START_MENU]),
     ("시세·스캔", ["1. 데이터 저장", "2. 이평 돌파 종목 서칭", "3. 서칭 데이터 조회"]),
     ("종목", ["4. 관심종목 서칭"]),
+    ("도움말", [GUIDE_MENU]),
 ]
 
 CLOUD_MENU_GROUPS = [
     (None, [START_MENU]),
     ("조회", ["3. 서칭 데이터 조회", "4. 관심종목 서칭", MAJOR_STOCKS_MENU]),
+    ("도움말", [GUIDE_MENU]),
 ]
 
 # 경량 버전은 저장 기능이 없어 4번 메뉴를 차트 조회로 표시한다.
@@ -2786,6 +2793,7 @@ FEATURE_HELP = {
     "7. 패턴 데이터 조회": "저장된 패턴(기록) 데이터를 조회합니다.",
     "8. 보유 종목 조회": "보유 종목 데이터를 조회합니다.",
     MAJOR_STOCKS_MENU: "시장 지수의 당일 시세와 주요 종목, 지수의 주봉·월봉 차트를 조회합니다.",
+    GUIDE_MENU: "메뉴별 사용법과 데이터의 뜻을 안내합니다. 위쪽 검색창으로 찾을 수 있습니다.",
 }
 if LITE_EDITION:
     FEATURE_HELP["4. 관심종목 서칭"] = "개별 종목의 주봉/월봉 차트를 조회합니다."
@@ -3397,6 +3405,9 @@ if not st.session_state.show_intro:
             )
     elif selected_menu == MAJOR_STOCKS_MENU:
         _render_major_stocks()
+    elif selected_menu == GUIDE_MENU:
+        edition = "cloud" if CLOUD_EDITION else "lite" if LITE_EDITION else "full"
+        components.html(user_guide.render_html(edition), height=GUIDE_HEIGHT, scrolling=True)
     elif selected_menu == "4. 관심종목 서칭":
         _render_stock_lookup_panel(save_mode="interest")
     elif selected_menu == "5. 관심종목 조회":

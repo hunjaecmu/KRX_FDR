@@ -11,6 +11,7 @@
 | `thumbnails.py` | 경량·서버 버전의 어두운 축소 썸네일 생성 |
 | `lite_data.py` | 서버 버전용 데이터 묶음 생성, 업로드, 내려받기, 설치 |
 | `auto_publish.py` | 전체 업데이트와 스캔 후 데이터 묶음 자동 업로드 |
+| `user_guide.py`, `user_guide.html` | 사용 가이드 화면. 버전별로 보여 줄 내용을 `data-editions`로 지정 |
 | `theme.css` | 공통 화면 스타일 |
 | `theme_lite.css` | 경량·서버 버전의 터미널 색상 |
 | `vendor/` | Lightweight Charts v5.2.1 파일과 라이선스 |
