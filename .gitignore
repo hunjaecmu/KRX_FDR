@@ -5,8 +5,9 @@
 /.app_data/data/raw/
 /.app_data/data/tracking/*.csv
 /.app_data/output/
-/__pycache__/
-/scripts/__pycache__/
+/portfolio_dashboard.html
+/portfolio_dashboard_data/
+__pycache__/
 *.csv
 *.xlsx
 *.pyd

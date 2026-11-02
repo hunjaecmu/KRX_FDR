@@ -31,6 +31,7 @@ from config import (
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
+from webapp import storage
 
 
 st.set_page_config(
@@ -408,93 +409,6 @@ def _extract_last_bar_snapshot(code: str, timeframe: str, target_date: pd.Timest
     return pd.to_datetime(row["date"]), float(row["close"])
 
 
-def _append_tracking_row(file_path: str, row: dict) -> None:
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-    row_df = pd.DataFrame([row])
-    if os.path.isfile(file_path):
-        try:
-            old_df = pd.read_csv(file_path, dtype=str)
-            out_df = pd.concat([old_df, row_df], ignore_index=True)
-        except Exception:
-            out_df = row_df
-    else:
-        out_df = row_df
-
-    out_df.to_csv(file_path, index=False, encoding="utf-8-sig")
-
-
-def _record_display_options() -> list[str]:
-    return [f"{label}: {fname.replace('.csv', '')}" for label, fname in RECORD_FILE_OPTIONS]
-
-
-def _record_label_to_filename(display_label: str) -> str:
-    left_label = str(display_label).split(":", 1)[0].strip()
-    return dict(RECORD_FILE_OPTIONS).get(left_label, "MA10_W_Break.csv")
-
-
-def _interest_watch_month_token(ref_date: Optional[date] = None) -> str:
-    base = ref_date if ref_date is not None else date.today()
-    return f"{base.year:04d}{base.month:02d}"
-
-
-def _interest_watch_monthly_filename(month_token: str) -> str:
-    return f"watch_{str(month_token).strip()}.csv"
-
-
-def _interest_watch_monthly_path(month_token: Optional[str] = None) -> str:
-    token = str(month_token).strip() if month_token else _interest_watch_month_token()
-    return os.path.join(TRACKING_INPUT_DIR, _interest_watch_monthly_filename(token))
-
-
-def _parse_interest_watch_month_from_filename(filename: str) -> Optional[str]:
-    name = str(filename).strip()
-    m1 = re.match(r"^watch_(\d{6})\.csv$", name)
-    if m1:
-        return m1.group(1)
-    m2 = re.match(r"^(\d{6})\.csv$", name)
-    if m2:
-        return m2.group(1)
-    return None
-
-
-def _interest_watch_file_options(tracking_dir: str) -> list[tuple[str, str]]:
-    options: list[tuple[str, str]] = []
-    current_month = _interest_watch_month_token()
-    current_path = _interest_watch_monthly_path(current_month)
-    options.append((f"{current_month} (현재월)", current_path))
-
-    if not os.path.isdir(tracking_dir):
-        return options
-
-    month_map: dict[str, str] = {}
-    legacy_path = None
-    for fname in os.listdir(tracking_dir):
-        full_path = os.path.join(tracking_dir, fname)
-        if not os.path.isfile(full_path):
-            continue
-        if str(fname).lower() == "watch.csv":
-            legacy_path = full_path
-            continue
-
-        month_token = _parse_interest_watch_month_from_filename(str(fname))
-        if month_token:
-            month_map[month_token] = full_path
-
-    for month_token in sorted(month_map.keys(), reverse=True):
-        display = f"{month_token}"
-        if month_token == current_month:
-            display = f"{month_token} (현재월)"
-        pair = (display, month_map[month_token])
-        if pair not in options:
-            options.append(pair)
-
-    if legacy_path:
-        options.append(("legacy watch.csv", legacy_path))
-
-    return options
-
-
 def _infer_timeframe_from_case_key(case_key: str) -> str:
     return "weekly" if str(case_key).strip().startswith("weekly_") else "monthly"
 
@@ -680,13 +594,13 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             if save_mode == "record":
                 record_file_label = st.selectbox(
                     "기록 파일명",
-                    options=_record_display_options(),
+                    options=storage.record_display_options(),
                     index=0,
                     key=f"{prefix}_record_file",
                     help="tracking 폴더 아래 고정 파일명 중 하나로 저장됩니다.",
                 )
             else:
-                current_watch_path = _interest_watch_monthly_path()
+                current_watch_path = storage.interest_watch_monthly_path()
                 st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
 
         if st.button("현재 차트 데이터 저장", width="stretch", key=f"{prefix}_save"):
@@ -709,11 +623,11 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
                 tracking_dir = TRACKING_INPUT_DIR
                 if save_mode == "interest":
-                    target_file = _interest_watch_monthly_path()
+                    target_file = storage.interest_watch_monthly_path()
                 else:
-                    target_file = os.path.join(tracking_dir, _record_label_to_filename(str(record_file_label)))
+                    target_file = os.path.join(tracking_dir, storage.record_label_to_filename(str(record_file_label)))
 
-                _append_tracking_row(target_file, row)
+                storage.append_row(target_file, row)
                 st.success(f"저장 완료: {target_file}")
             except Exception as save_e:
                 st.error(f"저장 실패: {save_e}")
@@ -726,7 +640,7 @@ def _render_interest_watch_data() -> None:
     tracking_dir = TRACKING_INPUT_DIR
     os.makedirs(tracking_dir, exist_ok=True)
 
-    watch_options = _interest_watch_file_options(tracking_dir)
+    watch_options = storage.interest_watch_file_options(tracking_dir)
     watch_option_labels = [x[0] for x in watch_options]
     watch_option_map = {label: path for label, path in watch_options}
 
@@ -741,7 +655,7 @@ def _render_interest_watch_data() -> None:
     st.markdown("#### 관심 데이터")
     if os.path.isfile(watch_path):
         try:
-            wdf = pd.read_csv(watch_path, dtype=str)
+            wdf = storage.read_csv(watch_path, dtype=str)
             st.caption(f"파일: {watch_path}")
 
             if wdf.empty:
@@ -918,7 +832,7 @@ def _render_interest_watch_data() -> None:
                             drop_idx = int(pending_idx)
                             if 0 <= drop_idx < len(wdf):
                                 updated = wdf.drop(index=drop_idx).reset_index(drop=True)
-                                updated.to_csv(watch_path, index=False, encoding="utf-8-sig")
+                                storage.write_csv(watch_path, updated)
                             st.session_state.pop("watch_delete_pending_idx", None)
                             st.session_state.pop("watch_delete_pending_name", None)
                             st.rerun()
@@ -1029,7 +943,7 @@ div[data-testid="stTextArea"] textarea {
                         st.error("메모 저장 대상 행을 찾지 못했습니다.")
                     else:
                         wdf.loc[int(memo_row_idx), "메모"] = str(memo_input)
-                        wdf.to_csv(watch_path, index=False, encoding="utf-8-sig")
+                        storage.write_csv(watch_path, wdf)
                         if isinstance(picked, dict):
                             picked["memo"] = str(memo_input)
                             st.session_state[selected_key] = picked
@@ -1098,9 +1012,10 @@ def _render_saved_pattern_data() -> None:
         count = 0
         if os.path.isfile(path):
             try:
-                count = int(len(pd.read_csv(path)))
-            except Exception:
-                count = 0
+                count = int(len(storage.read_csv(path, dtype=str)))
+            except storage.CsvReadError as read_e:
+                count = None
+                st.warning(str(read_e))
         summary_rows.append({"구분": label, "파일명": filename, "행수": count})
 
     st.markdown("#### 기록 파일 요약")
@@ -1109,14 +1024,14 @@ def _render_saved_pattern_data() -> None:
     st.markdown("#### 기록 데이터")
     record_file_label = st.selectbox(
         "기록 파일 선택",
-        options=_record_display_options(),
+        options=storage.record_display_options(),
         index=0,
         key="pattern_view_record_file",
     )
-    selected_record_path = os.path.join(tracking_dir, _record_label_to_filename(record_file_label))
+    selected_record_path = os.path.join(tracking_dir, storage.record_label_to_filename(record_file_label))
     if os.path.isfile(selected_record_path):
         try:
-            rdf = pd.read_csv(selected_record_path, dtype=str)
+            rdf = storage.read_csv(selected_record_path, dtype=str)
             st.caption(f"파일: {selected_record_path}")
 
             if rdf.empty:
@@ -1334,22 +1249,6 @@ def _render_saved_pattern_data() -> None:
             st.error(f"기록 파일 조회 실패: {e}")
     else:
         st.info("선택한 기록 파일이 아직 생성되지 않았습니다.")
-
-
-HOLDINGS_CODE_CANDIDATES = ["code", "종목코드", "티커", "ticker"]
-HOLDINGS_NAME_CANDIDATES = ["name", "종목명"]
-HOLDINGS_BUY_PRICE_CANDIDATES = ["buy_price", "매수가", "매입가"]
-HOLDINGS_QUANTITY_CANDIDATES = ["quantity", "보유수량", "수량", "shares"]
-HOLDINGS_MEMO_CANDIDATES = ["memo", "메모", "note", "비고"]
-
-
-def _pick_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
-    lower_map = {str(col).strip().lower(): col for col in df.columns}
-    for c in candidates:
-        key = str(c).strip().lower()
-        if key in lower_map:
-            return lower_map[key]
-    return None
 
 
 def _to_number_series(series: pd.Series) -> pd.Series:
@@ -1576,14 +1475,14 @@ def _add_anchor_guides_to_chart(
 
 
 def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
-    code_col = _pick_column(raw_df, HOLDINGS_CODE_CANDIDATES)
+    code_col = storage.pick_column(raw_df, storage.HOLDINGS_CODE_CANDIDATES)
     if code_col is None:
         raise ValueError("holdings.csv에 종목코드 컬럼(code/종목코드/티커/ticker)이 없습니다.")
 
-    name_col = _pick_column(raw_df, HOLDINGS_NAME_CANDIDATES)
-    buy_col = _pick_column(raw_df, HOLDINGS_BUY_PRICE_CANDIDATES)
-    qty_col = _pick_column(raw_df, HOLDINGS_QUANTITY_CANDIDATES)
-    memo_col = _pick_column(raw_df, HOLDINGS_MEMO_CANDIDATES)
+    name_col = storage.pick_column(raw_df, storage.HOLDINGS_NAME_CANDIDATES)
+    buy_col = storage.pick_column(raw_df, storage.HOLDINGS_BUY_PRICE_CANDIDATES)
+    qty_col = storage.pick_column(raw_df, storage.HOLDINGS_QUANTITY_CANDIDATES)
+    memo_col = storage.pick_column(raw_df, storage.HOLDINGS_MEMO_CANDIDATES)
 
     if buy_col is None:
         raise ValueError("holdings.csv에 매수가 컬럼(buy_price/매수가/매입가)이 없습니다.")
@@ -1662,47 +1561,6 @@ def _build_holdings_performance_df(raw_df: pd.DataFrame) -> pd.DataFrame:
         out[col] = pd.to_numeric(out[col], errors="coerce")
 
     return out
-
-
-def _load_holdings_source_df(holdings_path: str) -> pd.DataFrame:
-    if os.path.isfile(holdings_path):
-        try:
-            hdf = pd.read_csv(holdings_path, dtype=str)
-            return hdf.fillna("")
-        except Exception:
-            pass
-    return pd.DataFrame(columns=["종목코드", "종목명", "매수가", "보유수량", "메모"])
-
-
-def _add_holding_row(
-    holdings_path: str,
-    code: str,
-    name: str,
-    buy_price_text: str,
-    quantity_text: str,
-    memo_text: str,
-) -> None:
-    hdf = _load_holdings_source_df(holdings_path)
-
-    code_col = _pick_column(hdf, HOLDINGS_CODE_CANDIDATES) or "종목코드"
-    name_col = _pick_column(hdf, HOLDINGS_NAME_CANDIDATES) or "종목명"
-    buy_col = _pick_column(hdf, HOLDINGS_BUY_PRICE_CANDIDATES) or "매수가"
-    qty_col = _pick_column(hdf, HOLDINGS_QUANTITY_CANDIDATES) or "보유수량"
-    memo_col = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES) or "메모"
-
-    for col in [code_col, name_col, buy_col, qty_col, memo_col]:
-        if col not in hdf.columns:
-            hdf[col] = ""
-
-    new_row = {col: "" for col in hdf.columns}
-    new_row[code_col] = str(code).strip().zfill(6)
-    new_row[name_col] = str(name).strip()
-    new_row[buy_col] = str(buy_price_text).strip()
-    new_row[qty_col] = str(quantity_text).strip()
-    new_row[memo_col] = str(memo_text)
-
-    out_df = pd.concat([hdf, pd.DataFrame([new_row])], ignore_index=True)
-    out_df.to_csv(holdings_path, index=False, encoding="utf-8-sig")
 
 
 def _render_output_holdings_data() -> None:
@@ -1789,7 +1647,7 @@ def _render_output_holdings_data() -> None:
             if pd.isna(qty_val) or float(qty_val) <= 0:
                 raise ValueError("수량은 0보다 큰 숫자로 입력하세요.")
 
-            _add_holding_row(
+            storage.add_holding_row(
                 holdings_path=holdings_path,
                 code=code,
                 name=resolved_name,
@@ -1805,11 +1663,11 @@ def _render_output_holdings_data() -> None:
     st.markdown("#### 보유 종목 데이터")
     if os.path.isfile(holdings_path):
         try:
-            hdf = pd.read_csv(holdings_path, dtype=str)
-            memo_col_name = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES)
+            hdf = storage.read_csv(holdings_path, dtype=str)
+            memo_col_name = storage.pick_column(hdf, storage.HOLDINGS_MEMO_CANDIDATES)
             if memo_col_name is None:
                 hdf["메모"] = ""
-                hdf.to_csv(holdings_path, index=False, encoding="utf-8-sig")
+                storage.write_csv(holdings_path, hdf)
             st.caption(f"파일: {holdings_path}")
 
             perf_df = _build_holdings_performance_df(hdf)
@@ -2043,11 +1901,11 @@ def _render_output_holdings_data() -> None:
                                     "분류": send_classification,
                                     "메모": str(send_memo),
                                 }
-                                _append_tracking_row(_interest_watch_monthly_path(), interest_row)
+                                storage.append_row(storage.interest_watch_monthly_path(), interest_row)
 
                             if 0 <= raw_idx < len(hdf):
                                 updated_hdf = hdf.drop(index=raw_idx).reset_index(drop=True)
-                                updated_hdf.to_csv(holdings_path, index=False, encoding="utf-8-sig")
+                                storage.write_csv(holdings_path, updated_hdf)
                             st.session_state.pop("holdings_delete_pending_raw", None)
                             st.session_state.pop("holdings_delete_pending_name", None)
                             st.session_state.pop("holdings_delete_pending_code", None)
@@ -2110,7 +1968,7 @@ def _render_output_holdings_data() -> None:
                 ):
                     default_memo = ""
                     if isinstance(memo_row_idx, int) and 0 <= int(memo_row_idx) < len(hdf):
-                        memo_col_name = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES)
+                        memo_col_name = storage.pick_column(hdf, storage.HOLDINGS_MEMO_CANDIDATES)
                         if memo_col_name is not None:
                             default_memo = str(hdf.iloc[int(memo_row_idx)].get(memo_col_name, ""))
                         else:
@@ -2138,7 +1996,7 @@ def _render_output_holdings_data() -> None:
 
                 if memo_save_clicked:
                     try:
-                        memo_col_name = _pick_column(hdf, HOLDINGS_MEMO_CANDIDATES) or "메모"
+                        memo_col_name = storage.pick_column(hdf, storage.HOLDINGS_MEMO_CANDIDATES) or "메모"
                         if memo_col_name not in hdf.columns:
                             hdf[memo_col_name] = ""
 
@@ -2146,7 +2004,7 @@ def _render_output_holdings_data() -> None:
                             st.error("메모 저장 대상 행을 찾지 못했습니다.")
                         else:
                             hdf.loc[int(memo_row_idx), memo_col_name] = str(memo_input)
-                            hdf.to_csv(holdings_path, index=False, encoding="utf-8-sig")
+                            storage.write_csv(holdings_path, hdf)
                             if isinstance(picked, dict):
                                 picked["memo"] = str(memo_input)
                                 st.session_state[pick_key] = picked
@@ -2278,7 +2136,7 @@ def get_data_status(data_dir: str) -> dict:
     }
     if os.path.isfile(master_csv):
         try:
-            mdf = pd.read_csv(master_csv, dtype={"code": str})
+            mdf = storage.read_csv(master_csv, dtype={"code": str})
             market_series = mdf.get("market", pd.Series(dtype=str)).fillna("").astype(str).str.upper()
             status["kospi_count"] = int((market_series == "KOSPI").sum())
             status["kosdaq_count"] = int((market_series == "KOSDAQ").sum())
@@ -2387,7 +2245,7 @@ def get_scan_status(output_dir: str) -> dict:
     if os.path.isfile(summary_path):
         status["summary_path"] = summary_path
         try:
-            sdf = pd.read_csv(summary_path)
+            sdf = storage.read_csv(summary_path)
             required_cols = {"scan_label", "count"}
             if required_cols.issubset(set(sdf.columns)):
                 sdf["count"] = pd.to_numeric(sdf["count"], errors="coerce").fillna(0).astype(int)
@@ -2416,7 +2274,7 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
     all_breakouts_path = os.path.join(scan_dir, "all_breakouts.csv")
     if os.path.isfile(all_breakouts_path):
         try:
-            bdf = pd.read_csv(all_breakouts_path, dtype={"code": str})
+            bdf = storage.read_csv(all_breakouts_path, dtype={"code": str})
             if "code" in bdf.columns:
                 bdf["code"] = (
                     bdf["code"]
@@ -2660,7 +2518,7 @@ def _render_case_gallery(
             value="",
             key=f"review_interest_memo_{case_key}",
         )
-        current_watch_path = _interest_watch_monthly_path()
+        current_watch_path = storage.interest_watch_monthly_path()
         st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
 
     can_save = bool(code_text)
@@ -2693,8 +2551,8 @@ def _render_case_gallery(
                 "분류": classification,
                 "메모": memo_text,
             }
-            target_watch_path = _interest_watch_monthly_path()
-            _append_tracking_row(target_watch_path, row)
+            target_watch_path = storage.interest_watch_monthly_path()
+            storage.append_row(target_watch_path, row)
             st.success(f"저장 완료: {target_watch_path}")
         except Exception as save_e:
             st.error(f"저장 실패: {save_e}")

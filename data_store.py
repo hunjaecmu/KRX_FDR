@@ -2,8 +2,13 @@ import os
 import re
 import time
 import calendar
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
+
+# Keep OpenBLAS from allocating a thread pool in every derived worker.
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import pandas as pd
 import FinanceDataReader as fdr
@@ -23,11 +28,13 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 MASTER_FILE = os.path.join(MASTER_DIR, "kospi_tickers.csv")
 
 START_YEARS_AGO = 25
-SLEEP_SEC_BETWEEN_TICKERS = 0.12
+SLEEP_SEC_BETWEEN_TICKERS = 0.03
 SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
 # 전체 시세를 메모리에 오래 유지하지 않으면서 디스크 쓰기 횟수를 줄이는 기준.
 RAW_SAVE_BUFFER_SIZE = 50
+DERIVED_MAX_WORKERS = 4
+PROGRESS_PRINT_INTERVAL = 50
 
 MA_WINDOWS = [5, 10, 20, 120, 180, 240]
 
@@ -391,84 +398,42 @@ def fetch_ohlcv_with_retry(
 
     raise last_error
 
-def get_existing_last_date(file_path: str) -> Optional[str]:
-    if not os.path.exists(file_path):
-        return None
+def get_last_date_and_status(df: pd.DataFrame) -> tuple[Optional[str], Optional[str]]:
+    """load_raw_daily 결과(날짜순 정렬, 중복 제거)의 마지막 날짜와 price_status."""
+    if df.empty:
+        return None, None
 
-    try:
-        df = pd.read_csv(file_path)
-        if df.empty or "date" not in df.columns:
-            return None
-        last_dt = pd.to_datetime(df["date"]).max()
-        return last_dt.strftime("%Y-%m-%d")
-    except Exception:
-        return None
+    last = df.iloc[-1]
+    last_date = pd.to_datetime(last["date"]).strftime("%Y-%m-%d")
+    status = last["price_status"]
+    if pd.isna(status):
+        return last_date, None
 
-
-def get_existing_last_price_status(file_path: str) -> Optional[str]:
-    if not os.path.exists(file_path):
-        return None
-
-    try:
-        df = pd.read_csv(file_path)
-        if df.empty or "date" not in df.columns:
-            return None
-
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
-        if df.empty:
-            return None
-
-        if "price_status" not in df.columns:
-            return None
-
-        last_idx = df["date"].idxmax()
-        status = df.loc[last_idx, "price_status"]
-        if pd.isna(status):
-            return None
-
-        status = str(status).strip()
-        return status if status else None
-    except Exception:
-        return None
+    status = str(status).strip()
+    return last_date, status if status else None
 
 
-def get_trailing_intraday_dates(file_path: str) -> List[str]:
+def get_trailing_intraday_dates(df: pd.DataFrame) -> List[str]:
     """
     마지막 저장일에서 과거로 거슬러 올라가며 연속된 '장중' 날짜를 수집.
     예) [..., 2026-04-08(장중), 2026-04-09(장중)] -> ["2026-04-09", "2026-04-08"]
     """
-    if not os.path.exists(file_path):
-        return []
+    targets: List[str] = []
+    for _, row in df.iloc[::-1].iterrows():
+        status = str(row.get("price_status", "")).strip()
+        if status == "장중":
+            targets.append(pd.to_datetime(row["date"]).strftime("%Y-%m-%d"))
+        else:
+            break
 
-    try:
-        df = load_raw_daily(file_path)
-        if df.empty or "price_status" not in df.columns:
-            return []
-
-        df = (
-            df.sort_values("date")
-              .drop_duplicates(subset=["date"], keep="last")
-              .reset_index(drop=True)
-        )
-
-        targets: List[str] = []
-        for _, row in df.iloc[::-1].iterrows():
-            status = str(row.get("price_status", "")).strip()
-            if status == "장중":
-                targets.append(pd.to_datetime(row["date"]).strftime("%Y-%m-%d"))
-            else:
-                break
-
-        return targets
-    except Exception:
-        return []
+    return targets
 
 
 def repair_trailing_intraday_to_final(
     code: str,
     name: str,
     file_path: str,
+    old_df: pd.DataFrame,
     end_date: str,
     run_meta: Dict[str, str],
     save: bool = True,
@@ -477,7 +442,7 @@ def repair_trailing_intraday_to_final(
     마지막 저장일 기준 연속된 '장중' 구간 중 과거 날짜(< end_date)에 대해
     과거 날짜가 2일 이상이면 범위로 조회해 종가 데이터를 덮어쓴다.
     """
-    trailing = get_trailing_intraday_dates(file_path)
+    trailing = get_trailing_intraday_dates(old_df)
     if not trailing:
         return {"checked": 0, "repaired": 0}
 
@@ -485,10 +450,6 @@ def repair_trailing_intraday_to_final(
     # 과거 날짜의 장중 표기만 종가로 보정한다.
     historical_targets = [d for d in trailing if d < end_date]
     if not historical_targets:
-        return {"checked": len(trailing), "repaired": 0}
-
-    old_df = load_raw_daily(file_path)
-    if old_df.empty:
         return {"checked": len(trailing), "repaired": 0}
 
     final_meta = dict(run_meta)
@@ -608,22 +569,32 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
         start_date = initial_start_date()
         mode = "REFRESH"
     else:
+        try:
+            existing_df = load_raw_daily(file_path)
+        except Exception as e:
+            return {
+                "status": "fail",
+                "message": f"실패: {e}",
+                "rows": 0,
+                "updated": False,
+                "reason": str(e),
+            }
+
         repair_info = repair_trailing_intraday_to_final(
             code=code,
             name=name,
             file_path=file_path,
+            old_df=existing_df,
             end_date=end_date,
             run_meta=run_meta,
             save=save,
         )
 
-        last_saved = get_existing_last_date(file_path)
+        last_saved, last_price_status = get_last_date_and_status(existing_df)
         if last_saved is None:
             start_date = initial_start_date()
             mode = "INIT"
         else:
-            last_price_status = get_existing_last_price_status(file_path)
-
             # Skip only when today's bar is already finalized.
             if last_saved == end_date and last_price_status == "종가":
                 return {
@@ -649,8 +620,10 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
                 start_date = next_day(last_saved)
                 mode = "INCR"
 
+    fetch_started = time.perf_counter()
     try:
         new_df = fetch_ohlcv_with_retry(code, start_date, end_date, metadata=run_meta)
+        fetch_sec = time.perf_counter() - fetch_started
 
         if force_full_refresh:
             merged = new_df.copy()
@@ -659,7 +632,7 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
             old_df = (
                 repaired_df
                 if isinstance(repaired_df, pd.DataFrame)
-                else load_raw_daily(file_path)
+                else existing_df
             )
             old_has_values = not old_df.dropna(how="all").empty
             new_has_values = not new_df.dropna(how="all").empty
@@ -670,6 +643,7 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
                     "message": "신규 데이터 없음",
                     "rows": 0,
                     "updated": False,
+                    "fetch_sec": round(fetch_sec, 3),
                 }
 
             if old_has_values and new_has_values:
@@ -704,6 +678,7 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
             "message": f"저장 완료 / rows={len(merged)} / added={added_rows}",
             "rows": int(added_rows),
             "updated": True,
+            "fetch_sec": round(fetch_sec, 3),
         }
         if not save:
             result["_pending_file_path"] = file_path
@@ -717,8 +692,9 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
             "rows": 0,
             "updated": False,
             "reason": str(e),
+            "fetch_sec": round(time.perf_counter() - fetch_started, 3),
         }
-        
+
 # =========================================================
 # 파생 데이터(일/주/월)
 # =========================================================
@@ -886,6 +862,57 @@ def market_group(market: str) -> str:
     return "KOSPI"
 
 
+def generate_derived_all(
+    tasks: List[tuple[str, str]],
+    total: int,
+    max_workers: int = DERIVED_MAX_WORKERS,
+) -> Dict[str, Dict]:
+    results: Dict[str, Dict] = {}
+
+    def record(code: str, res: Dict) -> None:
+        results[code] = res
+        done = len(results)
+        if done % PROGRESS_PRINT_INTERVAL == 0 or done == len(tasks):
+            print(f"[DERIVED {done}/{total}] 진행중", flush=True)
+
+    if max_workers > 1 and len(tasks) > 1:
+        try:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {
+                    executor.submit(generate_derived_for_one_stock, code, name): code
+                    for code, name in tasks
+                }
+                for future in as_completed(future_map):
+                    code = future_map[future]
+                    try:
+                        record(code, future.result())
+                    except BrokenProcessPool:
+                        raise
+                    except Exception as e:
+                        print(f"[DERIVED][FAIL] {code}: {e}")
+                        record(code, {"status": "fail", "reason": str(e)})
+        except BrokenProcessPool as e:
+            print(f"[DERIVED][WARN] process pool 종료, 남은 종목을 순차 처리합니다: {e}")
+
+    # 순차 실행이거나 process pool이 중단되어 남은 종목
+    for code, name in tasks:
+        if code not in results:
+            record(code, generate_derived_for_one_stock(code, name))
+
+    return results
+
+
+def append_timing_log(row: Dict) -> None:
+    timing_file = os.path.join(LOG_DIR, "update_timing.csv")
+    pd.DataFrame([row]).to_csv(
+        timing_file,
+        mode="a",
+        header=not os.path.exists(timing_file),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+
 def run_all(
     force_master_update: bool = False,
     derive_all: bool = True,
@@ -907,8 +934,10 @@ def run_all(
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("======================================")
 
+    run_started = time.perf_counter()
     master_df = update_master(force=force_master_update)
     master_df = master_df[master_df["market"].map(market_group).isin(selected)].reset_index(drop=True)
+    master_sec = time.perf_counter() - run_started
 
     raw_results = []
     derived_results = []
@@ -922,6 +951,7 @@ def run_all(
             save_raw_daily(file_path, df)
         pending_raw_saves.clear()
 
+    raw_started = time.perf_counter()
     for i, row in enumerate(master_df.itertuples(index=False), start=1):
         code = str(row.code).zfill(6)
         name = str(row.name).strip()
@@ -949,28 +979,26 @@ def run_all(
 
     flush_raw_saves()
     raw_result_df = pd.DataFrame(raw_results)
+    raw_sec = time.perf_counter() - raw_started
 
-    for i, row in enumerate(master_df.itertuples(index=False), start=1):
+    derived_started = time.perf_counter()
+    derive_tasks = [
+        (str(row.code).zfill(6), str(row.name).strip())
+        for row in master_df.itertuples(index=False)
+        if derive_all or str(row.code).zfill(6) in updated_codes
+    ]
+    derived_by_code = generate_derived_all(derive_tasks, total=len(derive_tasks))
+
+    for row in master_df.itertuples(index=False):
         code = str(row.code).zfill(6)
         name = str(row.name).strip()
-
-        if (not derive_all) and (code not in updated_codes):
-            derived_results.append({
-                "code": code,
-                "name": name,
-                "status": "skip_not_updated"
-            })
-            continue
-
-        print(f"\n[DERIVED {i}/{total}] {code} {name}")
-        res = generate_derived_for_one_stock(code, name)
+        res = derived_by_code.get(code, {"status": "skip_not_updated"})
         res["code"] = code
         res["name"] = name
         derived_results.append(res)
 
-        time.sleep(0.03)
-
     derived_result_df = pd.DataFrame(derived_results)
+    derived_sec = time.perf_counter() - derived_started
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_log_file = os.path.join(LOG_DIR, f"raw_update_result_{ts}.csv")
@@ -978,6 +1006,17 @@ def run_all(
 
     raw_result_df.to_csv(raw_log_file, index=False, encoding="utf-8-sig")
     derived_result_df.to_csv(derived_log_file, index=False, encoding="utf-8-sig")
+
+    fetch_sec = raw_result_df["fetch_sec"].sum() if "fetch_sec" in raw_result_df.columns else 0.0
+    append_timing_log({
+        "started_at": datetime.fromtimestamp(time.time() - (time.perf_counter() - run_started)).strftime("%Y-%m-%d %H:%M:%S"),
+        "stocks": total,
+        "master_sec": round(master_sec, 1),
+        "raw_sec": round(raw_sec, 1),
+        "fetch_sec": round(float(fetch_sec), 1),
+        "derived_sec": round(derived_sec, 1),
+        "derived_workers": DERIVED_MAX_WORKERS,
+    })
 
     print("\n======================================")
     print("RAW 결과 요약")
@@ -987,6 +1026,11 @@ def run_all(
     print("\nDERIVED 결과 요약")
     print(derived_result_df["status"].value_counts(dropna=False))
     print(f"DERIVED 로그: {derived_log_file}")
+
+    print(
+        f"\n소요 시간: 전체 {time.perf_counter() - run_started:.0f}초 "
+        f"(RAW {raw_sec:.0f}초, 조회 합계 {fetch_sec:.0f}초, DERIVED {derived_sec:.0f}초)"
+    )
     print("======================================")
 
 

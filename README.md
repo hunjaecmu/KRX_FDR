@@ -205,6 +205,7 @@ streamlit run web_app.py
 - `run_position_tracking.md`
 - `historical_chart_viewer.md`
 - `replay_latest_scan.md`
+- `webapp/storage.md`
 - `scripts/*.md`
 
 ## 참고

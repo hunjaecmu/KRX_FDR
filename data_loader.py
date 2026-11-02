@@ -54,11 +54,17 @@ def _find_file(folder: str, code: str):
     if not os.path.exists(folder):
         return None
 
-    for f in os.listdir(folder):
-        if f.startswith(code + "_") and f.endswith(".csv"):
-            return os.path.join(folder, f)
+    matches = [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if f.startswith(code + "_") and f.endswith(".csv")
+    ]
 
-    return None
+    if not matches:
+        return None
+
+    # 종목명이 바뀌면 옛 이름의 파일이 남으므로 가장 최근에 갱신된 파일을 사용
+    return max(matches, key=os.path.getmtime)
 
 
 def _load_csv_with_date(file_path: str) -> pd.DataFrame:
