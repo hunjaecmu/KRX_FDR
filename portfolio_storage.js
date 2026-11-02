@@ -31,7 +31,7 @@ async function savePersonalExport(content,name){
 }
 function applyDiskPortfolio(){
  const next=validatePortfolio(portfolioDiskDocument),changed=JSON.stringify(next)!==JSON.stringify(portfolioDiskDocument);
- portfolio=next;portfolioSavePending=null;portfolioSaveBlocked=false;portfolioSavedKey=changed?null:portfolioKey(next);dirty=changed;activeAccountId=null;cancelHoldingEdit();resetDividendReceiptForm();switchView('portfolio');
+ portfolio=next;portfolioSavePending=null;portfolioSaveBlocked=false;portfolioSavedKey=changed?null:portfolioKey(next);dirty=changed;activeAccountId=null;cancelHoldingEdit();cancelAssetClassificationEdit();resetDividendReceiptForm();switchView('portfolio');
  try{localStorage.setItem('krx-portfolio-v1',JSON.stringify(portfolio))}catch{}
  renderPortfolio();renderSaveState();portfolioStorageMessageSet('JSON 파일을 불러왔습니다 · '+portfolioStoragePath);
  if(changed)queuePortfolioSave('파일 형식 보강');

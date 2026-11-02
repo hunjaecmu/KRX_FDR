@@ -140,6 +140,7 @@ def export_dashboard(data_dir=None, output_dir=ROOT, progress=None):
     if output_dir.resolve() != ROOT.resolve():
         atomic_text(output_dir / "portfolio_accounts.js", (ROOT / "portfolio_accounts.js").read_text(encoding="utf-8"))
         atomic_text(output_dir / "portfolio_storage.js", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8"))
+        atomic_text(output_dir / "portfolio_asset_management.js", (ROOT / "portfolio_asset_management.js").read_text(encoding="utf-8"))
     target = output_dir / "portfolio_dashboard_data"
     history_dir = target / "history"
     symbols = load_symbols(data_dir)
@@ -209,6 +210,7 @@ def render_existing(output_dir=ROOT):
     if output_dir.resolve() != ROOT.resolve():
         atomic_text(output_dir / "portfolio_accounts.js", (ROOT / "portfolio_accounts.js").read_text(encoding="utf-8"))
         atomic_text(output_dir / "portfolio_storage.js", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8"))
+        atomic_text(output_dir / "portfolio_asset_management.js", (ROOT / "portfolio_asset_management.js").read_text(encoding="utf-8"))
     payload = json.loads((output_dir / "portfolio_dashboard_data" / "market.json").read_text(encoding="utf-8"))
     template = (ROOT / "portfolio_dashboard.template.html").read_text(encoding="utf-8")
     atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
@@ -334,7 +336,7 @@ def launch_dashboard(port=8765, open_browser=True, personal=False):
         base = f"http://127.0.0.1:{candidate}"
         try:
             info = local_request(base + "/api/status")
-            if info.get("instance_id") == INSTANCE_ID and info.get("market_update") and info.get("portfolio_storage") and info.get("storage_layout") == 2:
+            if info.get("instance_id") == INSTANCE_ID and info.get("market_update") and info.get("portfolio_storage") and info.get("storage_layout") == 2 and info.get("asset_classification") == 1:
                 chosen = candidate
                 update_storage_server_url(chosen)
                 render_existing(ROOT)
@@ -393,6 +395,37 @@ PORTFOLIO_LOCK = threading.Lock()
 
 def portfolio_path():
     return personal_storage.directories(ROOT)["main"] / "portfolio.json"
+
+
+def validate_asset_classifications(doc):
+    if "asset_classifications" not in doc:
+        return
+    records = doc["asset_classifications"]
+    if not isinstance(records, dict) or len(records) > 20000:
+        raise ValueError("공통 자산 분류 목록을 확인하세요.")
+    for key, record in records.items():
+        if not (isinstance(key, str) and re.fullmatch(r"(KRW|USD):[A-Z0-9][A-Z0-9.^:-]{0,23}", key) and isinstance(record, dict)):
+            raise ValueError("공통 자산 분류 키를 확인하세요.")
+        if not (record.get("region") in ("KR", "US", "GLOBAL", "OTHER", "UNKNOWN") and record.get("category") in ("broad_index", "thematic", "factor", "bond", "mixed", "individual", "cash_like", "other", "unknown") and record.get("management") in ("active", "passive", "unknown") and record.get("hedge") in ("hedged", "unhedged", "unknown") and record.get("status") in ("suggested", "confirmed")):
+            raise ValueError("공통 자산 분류의 지역·유형·전략을 확인하세요.")
+        tags = record.get("tags")
+        if not isinstance(tags, list) or len(tags) > 3 or any(not isinstance(tag, str) or tag not in ("covered_call", "leverage", "inverse") for tag in tags) or len(set(tags)) != len(tags):
+            raise ValueError("추가 운용전략을 확인하세요.")
+        if not isinstance(record.get("theme"), str) or len(record["theme"]) > 100 or not isinstance(record.get("source"), str) or len(record["source"]) > 500:
+            raise ValueError("분류 테마·근거를 확인하세요.")
+        try:
+            reviewed = record.get("reviewed_on")
+            if "reviewed_on" not in record or reviewed is not None and (not isinstance(reviewed, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", reviewed)):
+                raise ValueError()
+            if reviewed is not None:
+                date.fromisoformat(reviewed)
+            if record["status"] == "confirmed" and reviewed is None:
+                raise ValueError()
+            if not isinstance(record.get("updated_at"), str) or len(record["updated_at"]) > 40:
+                raise ValueError()
+            datetime.fromisoformat(record["updated_at"].replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("공통 자산 분류의 확인일을 확인하세요.") from None
 
 
 def validate_dividend_receipts(doc):
@@ -469,6 +502,7 @@ def validate_saved_portfolio(doc):
     if not isinstance(doc.get("fx"), dict):
         raise ValueError("환율 정보가 없습니다.")
     validate_dividend_receipts(doc)
+    validate_asset_classifications(doc)
     dumps(doc)  # Reject nonfinite values before touching any file.
     return doc
 
@@ -524,7 +558,7 @@ def serve(port):
                 return
             if path == "/api/status":
                 return self.respond(200, {"online_refresh": True, "market_update": True,
-                                          "instance_id": INSTANCE_ID, "portfolio_storage": True, "storage_layout": 2, "storage_paths": personal_storage.public_config(ROOT)})
+                                          "instance_id": INSTANCE_ID, "portfolio_storage": True, "storage_layout": 2, "asset_classification": 1, "storage_paths": personal_storage.public_config(ROOT)})
             if path == "/api/portfolio":
                 try:
                     with PORTFOLIO_LOCK:
@@ -557,8 +591,8 @@ def serve(port):
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
                 return self.wfile.write(raw)
-            if path == "/portfolio_accounts.js":
-                file = ROOT / "portfolio_accounts.js"
+            if path in {"/portfolio_accounts.js", "/portfolio_asset_management.js"}:
+                file = ROOT / path.lstrip("/")
                 mime = "text/javascript; charset=utf-8"
             elif path in {"/", "/portfolio_dashboard.html"}:
                 file = ROOT / "portfolio_dashboard.html"

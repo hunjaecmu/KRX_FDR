@@ -126,6 +126,7 @@ def write_bundle(project_root, doc, content, previous_text=None, writer=None):
                     digest = hashlib.sha256(old_raw).hexdigest()[:12]
                     outputs[path.parent / "archive" / f"{path.stem}_legacy_{digest}.json"] = old_raw
         outputs[path] = raw
+    add(dirs["main"] / "asset_classifications.json", {"classifications": doc.get("asset_classifications", {})})
     snapshots = doc["snapshots"]
     dates = set()
     for snapshot in snapshots:
