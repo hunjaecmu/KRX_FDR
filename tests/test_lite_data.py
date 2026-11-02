@@ -46,12 +46,20 @@ def write_source_data(data_dir: str, output_dir: str) -> None:
         f.write(b"png")
     with open(os.path.join(os.path.dirname(os.path.dirname(scan)), "all_breakouts.csv"), "w", encoding="utf-8") as f:
         f.write("scan_case\n")
-    index_dir = os.path.join(data_dir, "index", "weekly")
-    os.makedirs(index_dir)
-    for code, name in (("KS11", "KOSPI"), ("KQ11", "KOSDAQ")):
-        shutil.copy(
-            os.path.join(data_dir, "derived", "weekly", "000001_가.csv"), os.path.join(index_dir, f"{code}_{name}.csv")
-        )
+    for timeframe in ("weekly", "monthly"):
+        index_dir = os.path.join(data_dir, "index", timeframe)
+        os.makedirs(index_dir)
+        for code, name in (("KS11", "KOSPI"), ("KQ11", "KOSDAQ")):
+            shutil.copy(
+                os.path.join(data_dir, "derived", timeframe, "000001_가.csv"),
+                os.path.join(index_dir, f"{code}_{name}.csv"),
+            )
+    for code, name, close, change in (("KS11", "KOSPI", 5859.08, 2.2395), ("KQ11", "KOSDAQ", 734.36, -1.5)):
+        with open(os.path.join(data_dir, "index", f"{code}_summary.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "code": code, "name": name, "date": "2026-11-02", "close": close,
+                "change_pct": change, "price_status": "종가",
+            }, f)
 
 
 class SourceDataTestCase(unittest.TestCase):
@@ -68,6 +76,7 @@ class SourceDataTestCase(unittest.TestCase):
             "DERIVED_WEEKLY_DIR": os.path.join(self.src_data, "derived", "weekly"),
             "DERIVED_MONTHLY_DIR": os.path.join(self.src_data, "derived", "monthly"),
             "INDEX_WEEKLY_DIR": os.path.join(self.src_data, "index", "weekly"),
+            "INDEX_MONTHLY_DIR": os.path.join(self.src_data, "index", "monthly"),
         }.items():
             patcher = mock.patch.object(data_loader, attr, value)
             patcher.start()
@@ -84,7 +93,8 @@ class BundleTests(SourceDataTestCase):
         self.assertIn("data/lite/prices.parquet", names)
         self.assertIn("data/master/kospi_tickers.csv", names)
         self.assertIn("output/scan_result_20261102_100000/all_breakouts.csv", names)
-        self.assertEqual(self.manifest["price_rows"], 12)
+        self.assertEqual(self.manifest["price_rows"], 16)
+        self.assertEqual([s["code"] for s in self.manifest["index_summaries"]], ["KS11", "KQ11"])
 
     def test_personal_tracking_files_are_never_included(self):
         with zipfile.ZipFile(self.bundle) as bundle:
@@ -112,7 +122,9 @@ class BundleTests(SourceDataTestCase):
         with mock.patch.object(data_loader, "PRICES_PARQUET", os.path.join(self.dst_data, "lite", "prices.parquet")), \
                 mock.patch.object(data_loader, "USE_PARQUET", True):
             self.assertEqual(len(data_loader.load_weekly("KS11")), 2)
+            self.assertEqual(len(data_loader.load_monthly("KS11")), 2)
         self.assertEqual(len(data_loader.load_weekly("KQ11")), 2)
+        self.assertEqual(len(data_loader.load_monthly("KQ11")), 2)
 
     def test_rejects_paths_outside_target(self):
         evil = os.path.join(self.root, "evil.zip")
@@ -242,15 +254,37 @@ class CloudEditionTests(SourceDataTestCase):
             at.query_params["menu"] = "9"
             at.run()
             self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
-            chart.assert_not_called()
+            # 메뉴에 들어오면 KOSPI 주봉과 지수 요약이 바로 보인다.
+            self.assertEqual(chart.call_args.kwargs["code"], "KS11")
+            self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
             labels = [b.label for b in at.main.button]
-            self.assertEqual(labels, ["삼성전자", "SK하이닉스", "삼성전기", "KOSPI", "KOSDAQ"])
+            self.assertEqual(labels, ["KOSPI", "KOSDAQ", "삼성전자", "SK하이닉스", "삼성전기"])
+            summary_html = " ".join(m.value for m in at.markdown)
+            self.assertIn("5,859.08", summary_html)
+            self.assertIn("+2.24%", summary_html)
+            self.assertIn("-1.50%", summary_html)
 
             at.button(key="major_stock_009150").click().run()
+            self.assertEqual(chart.call_args.kwargs["code"], "009150")
+            self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+            self.assertEqual(at.button(key="major_stock_009150").proto.type, "primary")
+
+            at.radio(key="major_timeframe").set_value("월봉").run()
+            self.assertEqual(chart.call_args.kwargs["code"], "009150")
+            self.assertEqual(chart.call_args.kwargs["timeframe"], "monthly")
+
+            # 다른 항목을 고르면 주봉으로 돌아간다.
+            at.button(key="major_stock_KQ11").click().run()
+            self.assertEqual(chart.call_args.kwargs["code"], "KQ11")
+            self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+
+            # 메뉴를 다시 고르면 KOSPI 주봉부터 보여 준다.
+            at.radio(key="major_timeframe").set_value("월봉").run()
+            at.button(key="menu_btn_시작화면").click().run()
+            at.button(key="menu_btn_주요 종목").click().run()
         self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
-        self.assertEqual(chart.call_args.kwargs["code"], "009150")
+        self.assertEqual(chart.call_args.kwargs["code"], "KS11")
         self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
-        self.assertEqual(at.button(key="major_stock_009150").proto.type, "primary")
 
 
 if __name__ == "__main__":

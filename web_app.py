@@ -2304,12 +2304,35 @@ def _move_gallery(idx_key: str, delta: int, last_index: int, clicked_key: str, n
 
 def _select_major_stock(code: str) -> None:
     st.session_state.major_stock_code = code
+    st.session_state.major_timeframe = "주봉"
 
 
 def _available_major_indexes() -> list[tuple[str, str]]:
     manifest = lite_data.load_manifest(DATA_DIR) or {}
     codes = manifest.get("indices", [])
     return [(code, name) for code, name in INDEX_TICKERS if code in codes]
+
+
+def _render_index_summaries() -> None:
+    summaries = (lite_data.load_manifest(DATA_DIR) or {}).get("index_summaries", [])
+    if not summaries:
+        return
+
+    for col, item in zip(st.columns(len(summaries)), summaries):
+        change = item.get("change_pct")
+        if change is None:
+            change_text, change_class = "-", ""
+        else:
+            change_text = f"{float(change):+.2f}%"
+            change_class = "index-up" if change > 0 else "index-down" if change < 0 else ""
+        with col:
+            st.markdown(
+                f"<div class='status-card'><div class='status-title'>{html.escape(str(item['name']))} "
+                f"| {html.escape(str(item['date']))} {html.escape(str(item.get('price_status', '')))}</div>"
+                f"<div class='status-value'>{float(item['close']):,.2f} "
+                f"<span class='{change_class}'>{change_text}</span></div></div>",
+                unsafe_allow_html=True,
+            )
 
 
 def _render_major_buttons(title: str, items: list[tuple[str, str]], selected_code: Optional[str]) -> None:
@@ -2327,11 +2350,16 @@ def _render_major_buttons(title: str, items: list[tuple[str, str]], selected_cod
 
 
 def _render_major_stocks() -> None:
-    selected_code = st.session_state.get("major_stock_code")
     indexes = _available_major_indexes()
-    _render_major_buttons("종목", MAJOR_STOCKS, selected_code)
+    # 메뉴에 들어오면 첫 지수의 주봉을 바로 보여 준다.
+    if "major_stock_code" not in st.session_state and indexes:
+        st.session_state.major_stock_code = indexes[0][0]
+    selected_code = st.session_state.get("major_stock_code")
+
+    _render_index_summaries()
     if indexes:
         _render_major_buttons("지수", indexes, selected_code)
+    _render_major_buttons("종목", MAJOR_STOCKS, selected_code)
 
     if not selected_code:
         st.caption("버튼을 누르면 주봉 차트가 표시됩니다.")
@@ -2341,20 +2369,23 @@ def _render_major_stocks() -> None:
     if name is None:
         st.warning("선택한 항목의 데이터가 없습니다.")
         return
+
+    timeframe_label = st.radio("봉", ["주봉", "월봉"], horizontal=True, key="major_timeframe", label_visibility="collapsed")
+    timeframe = "weekly" if timeframe_label == "주봉" else "monthly"
     try:
-        # 진행 중인 주의 봉은 이번 주 금요일 날짜이므로 기준일을 넉넉히 뒤로 잡아 최신 봉까지 포함한다.
+        # 진행 중인 봉은 이번 주 금요일이나 이번 달 말일 날짜이므로 기준일을 뒤로 잡아 최신 봉까지 포함한다.
         fig, anchor_date = build_historical_chart_figure(
             code=selected_code,
             name=name,
-            timeframe="weekly",
-            target_date=pd.Timestamp(date.today()) + pd.Timedelta(days=7),
+            timeframe=timeframe,
+            target_date=pd.Timestamp(date.today()) + pd.Timedelta(days=40),
             lookback_bars=LOOKBACK_BARS,
         )
     except Exception as e:
         st.error(f"{name} 차트를 불러오지 못했습니다: {e}")
         return
 
-    st.caption(f"{name} ({selected_code}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | 주봉 {LOOKBACK_BARS}봉")
+    st.caption(f"{name} ({selected_code}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | {timeframe_label} {LOOKBACK_BARS}봉")
     st.pyplot(fig, width="stretch")
 
 
@@ -2720,7 +2751,7 @@ FEATURE_HELP = {
     "6. 패턴 데이터 입력": "개별 종목 조회 후 기록 데이터로 저장합니다.",
     "7. 패턴 데이터 조회": "저장된 패턴(기록) 데이터를 조회합니다.",
     "8. 보유 종목 조회": "보유 종목 데이터를 조회합니다.",
-    MAJOR_STOCKS_MENU: "주요 종목과 시장 지수의 최근 주봉 차트를 조회합니다.",
+    MAJOR_STOCKS_MENU: "시장 지수의 당일 시세와 주요 종목, 지수의 주봉·월봉 차트를 조회합니다.",
 }
 if LITE_EDITION:
     FEATURE_HELP["4. 관심종목 서칭"] = "개별 종목의 주봉/월봉 차트를 조회합니다."
@@ -2782,6 +2813,10 @@ for group_title, group_menus in (
         ):
             st.session_state.selected_menu = menu
             st.query_params["menu"] = str(FULL_MENU_ITEMS.index(menu))
+            if menu == MAJOR_STOCKS_MENU:
+                # 메뉴를 고를 때마다 첫 지수의 주봉부터 보여 준다.
+                st.session_state.pop("major_stock_code", None)
+                st.session_state.pop("major_timeframe", None)
             st.rerun()
 
 selected_menu = st.session_state.selected_menu
@@ -2850,8 +2885,8 @@ def _render_data_guide() -> None:
         index_names = [name for _, name in _available_major_indexes()]
         major_targets = ", ".join(name for _, name in MAJOR_STOCKS)
         if index_names:
-            major_targets += f"와 {', '.join(index_names)} 지수"
-        st.caption(f"**{MAJOR_STOCKS_MENU}:** {major_targets}의 최근 주봉 차트를 바로 볼 수 있습니다.")
+            major_targets = f"{', '.join(index_names)} 지수의 당일 시세와 {major_targets}, 지수"
+        st.caption(f"**{MAJOR_STOCKS_MENU}:** {major_targets}의 주봉·월봉 차트를 바로 볼 수 있습니다.")
     st.caption(
         "**데이터의 성격:** 실시간 시세가 아니며, 하루 한 번 수집해 스캔한 결과입니다. 기준 시각은 아래 데이터 현황에서 확인하세요. "
         "진행 중인 주·월의 봉은 이후 값이 달라져 돌파 여부도 바뀔 수 있습니다. "

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -115,20 +116,47 @@ class UpdateIndicesTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.dir = temp.name
+        self.weekly_dir = os.path.join(self.dir, "weekly")
+        self.monthly_dir = os.path.join(self.dir, "monthly")
+        os.makedirs(self.weekly_dir)
+        os.makedirs(self.monthly_dir)
         for patcher in (
-            mock.patch.object(ds, "INDEX_WEEKLY_DIR", self.dir),
+            mock.patch.object(ds, "INDEX_DIR", self.dir),
+            mock.patch.object(ds, "INDEX_WEEKLY_DIR", self.weekly_dir),
+            mock.patch.object(ds, "INDEX_MONTHLY_DIR", self.monthly_dir),
             mock.patch.object(ds, "ensure_dirs"),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
 
     def test_saves_weekly_files(self):
-        with mock.patch.object(ds, "fetch_ohlcv_with_retry", return_value=fetched(["2026-11-02", "2026-11-03"])):
+        raw = fetched(["2026-11-02", "2026-11-03"])
+        raw.loc[raw.index[0], "close"] = 100
+        raw.loc[raw.index[1], "close"] = 102
+        with mock.patch.object(ds, "fetch_ohlcv_with_retry", return_value=raw):
             ds.update_indices()
-        self.assertEqual(sorted(os.listdir(self.dir)), ["KQ11_KOSDAQ.csv", "KS11_KOSPI.csv"])
+        self.assertEqual(sorted(os.listdir(self.weekly_dir)), ["KQ11_KOSDAQ.csv", "KS11_KOSPI.csv"])
+        self.assertEqual(sorted(os.listdir(self.monthly_dir)), ["KQ11_KOSDAQ.csv", "KS11_KOSPI.csv"])
+        with open(os.path.join(self.dir, "KS11_summary.json"), encoding="utf-8") as f:
+            summary = json.load(f)
+        self.assertEqual(summary["date"], "2026-11-03")
+        self.assertEqual(summary["close"], 102)
+        self.assertAlmostEqual(summary["change_pct"], 2.0)
+
+    def test_past_day_is_final_even_when_collected_during_market_hours(self):
+        raw = fetched(["2026-10-30", "2026-11-02"])
+        raw["price_status"] = "장중"
+        with mock.patch.object(ds, "today_str", return_value="2026-11-03"):
+            self.assertEqual(ds.build_index_summary("KS11", "KOSPI", raw)["price_status"], "종가")
+        with mock.patch.object(ds, "today_str", return_value="2026-11-02"):
+            self.assertEqual(ds.build_index_summary("KS11", "KOSPI", raw)["price_status"], "장중")
+
+    def test_summary_without_previous_day_has_no_change(self):
+        summary = ds.build_index_summary("KS11", "KOSPI", fetched(["2026-11-03"]))
+        self.assertIsNone(summary["change_pct"])
 
     def test_failure_keeps_existing_file_and_continues(self):
-        existing = os.path.join(self.dir, "KS11_KOSPI.csv")
+        existing = os.path.join(self.weekly_dir, "KS11_KOSPI.csv")
         with open(existing, "w", encoding="utf-8") as f:
             f.write("old")
         fetch = mock.Mock(side_effect=[RuntimeError("down"), fetched(["2026-11-02"])])
@@ -136,7 +164,7 @@ class UpdateIndicesTests(unittest.TestCase):
             ds.update_indices()
         with open(existing, encoding="utf-8") as f:
             self.assertEqual(f.read(), "old")
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "KQ11_KOSDAQ.csv")))
+        self.assertTrue(os.path.exists(os.path.join(self.weekly_dir, "KQ11_KOSDAQ.csv")))
 
 
 class GenerateDerivedAllTests(unittest.TestCase):

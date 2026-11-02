@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -23,7 +24,9 @@ RAW_DAILY_DIR = os.path.join(DATA_DIR, "raw", "daily")
 DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
 DERIVED_WEEKLY_DIR = os.path.join(DATA_DIR, "derived", "weekly")
 DERIVED_MONTHLY_DIR = os.path.join(DATA_DIR, "derived", "monthly")
-INDEX_WEEKLY_DIR = os.path.join(DATA_DIR, "index", "weekly")
+INDEX_DIR = os.path.join(DATA_DIR, "index")
+INDEX_WEEKLY_DIR = os.path.join(INDEX_DIR, "weekly")
+INDEX_MONTHLY_DIR = os.path.join(INDEX_DIR, "monthly")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 MASTER_FILE = os.path.join(MASTER_DIR, "kospi_tickers.csv")
@@ -54,6 +57,7 @@ def ensure_dirs() -> None:
     os.makedirs(DERIVED_WEEKLY_DIR, exist_ok=True)
     os.makedirs(DERIVED_MONTHLY_DIR, exist_ok=True)
     os.makedirs(INDEX_WEEKLY_DIR, exist_ok=True)
+    os.makedirs(INDEX_MONTHLY_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
 
 
@@ -855,8 +859,27 @@ def generate_derived_for_one_stock(code: str, name: str) -> Dict:
 # =========================================================
 # 전체 실행
 # =========================================================
+def build_index_summary(code: str, name: str, raw_df: pd.DataFrame) -> Dict:
+    """최신 거래일의 종가와 전일 대비 등락률."""
+    ordered = raw_df.sort_values("date")
+    last = ordered.iloc[-1]
+    close = float(last["close"])
+    prev_close = float(ordered.iloc[-2]["close"]) if len(ordered) >= 2 else None
+    last_date = pd.to_datetime(last["date"]).strftime("%Y-%m-%d")
+    # 수집 시각이 장중이어도 지난 거래일의 값은 이미 확정된 종가다.
+    price_status = str(last.get("price_status", "")) if last_date == today_str("%Y-%m-%d") else "종가"
+    return {
+        "code": code,
+        "name": name,
+        "date": last_date,
+        "close": close,
+        "change_pct": (close / prev_close - 1) * 100 if prev_close else None,
+        "price_status": price_status,
+    }
+
+
 def update_indices() -> None:
-    """시장 지수의 주봉을 새로 만든다. 실패하면 기존 파일을 유지한다."""
+    """시장 지수의 주봉, 월봉, 당일 요약을 새로 만든다. 실패하면 기존 파일을 유지한다."""
     ensure_dirs()
     run_meta = get_run_metadata()
     for code, name in INDEX_TICKERS:
@@ -864,8 +887,14 @@ def update_indices() -> None:
             raw_df = fetch_ohlcv_with_retry(code, initial_start_date(), today_str("%Y-%m-%d"), metadata=run_meta)
             if raw_df.empty:
                 raise ValueError("조회 결과가 없습니다.")
-            save_derived_file(os.path.join(INDEX_WEEKLY_DIR, f"{code}_{name}.csv"), build_weekly_derived(raw_df))
-            print(f"[INDEX] {name} 주봉 저장 완료")
+            weekly_df = build_weekly_derived(raw_df)
+            monthly_df = build_monthly_derived(raw_df)
+            summary = build_index_summary(code, name, raw_df)
+            save_derived_file(os.path.join(INDEX_WEEKLY_DIR, f"{code}_{name}.csv"), weekly_df)
+            save_derived_file(os.path.join(INDEX_MONTHLY_DIR, f"{code}_{name}.csv"), monthly_df)
+            with open(os.path.join(INDEX_DIR, f"{code}_summary.json"), "w", encoding="utf-8") as f:
+                json.dump(summary, f, ensure_ascii=False)
+            print(f"[INDEX] {name} 저장 완료")
         except Exception as e:
             print(f"[INDEX][WARN] {name} 갱신 실패: {e}")
 

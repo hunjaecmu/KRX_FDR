@@ -11,6 +11,7 @@ DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
 DERIVED_WEEKLY_DIR = os.path.join(DATA_DIR, "derived", "weekly")
 DERIVED_MONTHLY_DIR = os.path.join(DATA_DIR, "derived", "monthly")
 INDEX_WEEKLY_DIR = os.path.join(DATA_DIR, "index", "weekly")
+INDEX_MONTHLY_DIR = os.path.join(DATA_DIR, "index", "monthly")
 INDEX_CODES = {code for code, _ in INDEX_TICKERS}
 PRICES_PARQUET = os.path.join(DATA_DIR, "lite", "prices.parquet")
 USE_PARQUET = os.getenv("KRX_DATA_SOURCE") == "parquet"
@@ -135,4 +136,5 @@ def load_weekly(code: str) -> pd.DataFrame:
 def load_monthly(code: str) -> pd.DataFrame:
     if USE_PARQUET:
         return _load_parquet_prices(code, "monthly")
-    return _load_csv_with_date(_find_file(DERIVED_MONTHLY_DIR, code))
+    folder = INDEX_MONTHLY_DIR if str(code) in INDEX_CODES else DERIVED_MONTHLY_DIR
+    return _load_csv_with_date(_find_file(folder, code))
