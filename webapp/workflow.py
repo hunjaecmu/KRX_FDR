@@ -27,9 +27,29 @@ def _parse_collection_time(text: object) -> Optional[datetime]:
         return None
 
 
+def market_trade_dates(data_status: dict) -> dict[str, str]:
+    """데이터가 있는 시장별 최신 일자."""
+    markets = data_status.get("markets") or {}
+    return {
+        name: str(stat["latest_trade_date"])
+        for name, stat in markets.items()
+        if stat.get("latest_trade_date")
+    }
+
+
+def mismatched_market_message(data_status: dict) -> Optional[str]:
+    """시장별 최신 일자가 다르면 경고 문구를 돌려준다."""
+    dates = market_trade_dates(data_status)
+    if len(set(dates.values())) <= 1:
+        return None
+    detail = ", ".join(f"{name} {value}" for name, value in dates.items())
+    return f"시장별 데이터 기준일이 다릅니다 ({detail}). 스캔 전에 전체 업데이트를 권장합니다."
+
+
 def build_steps(data_status: dict, scan_status: dict, today: date) -> list[dict]:
     """데이터 저장 → 돌파 서칭 → 결과 조회의 현재 상태를 계산한다."""
-    trade_date = data_status.get("latest_trade_date")
+    # 일부 시장만 갱신한 경우 가장 뒤처진 시장을 기준으로 판단한다.
+    trade_date = min(market_trade_dates(data_status).values(), default=data_status.get("latest_trade_date"))
     data_done = bool(trade_date) and str(trade_date) >= latest_weekday(today).strftime("%Y-%m-%d")
 
     scan_time = _parse_scan_time(scan_status.get("latest_scan_label"))

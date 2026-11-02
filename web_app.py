@@ -2862,6 +2862,10 @@ else:
                 )
         else:
             st.warning("최신 데이터 일자를 찾을 수 없습니다. 지금 업데이트 버튼 실행이 필요합니다.")
+    if selected_menu in ("1. 데이터 저장", "2. 이평 돌파 종목 서칭"):
+        market_date_message = workflow.mismatched_market_message(data_status)
+        if market_date_message:
+            st.warning(market_date_message)
     if selected_menu == "2. 이평 돌파 종목 서칭":
         latest_scan = scan_status.get("latest_scan_label", "")
         today_prefix = date.today().strftime("%Y%m%d")
@@ -2922,21 +2926,33 @@ if not st.session_state.show_intro:
             )
 
         running = st.session_state.data_store_running
-        btn_cols = st.columns(4)
         clicked_target = None
-        for bcol, (mkey, mlabel) in zip(btn_cols[:3], market_labels.items()):
-            label = f"{mlabel} 업데이트"
-            if st.session_state.awaiting_update_confirm == mkey:
-                label = f"확인: {mlabel} 최신, 다시 눌러 업데이트"
-            if running and st.session_state.data_store_target == [mkey]:
-                label = f"{mlabel} 업데이트 실행중..."
-            with bcol:
-                if st.button(label, type="primary", width="stretch", key=f"run_data_store_{mkey}", disabled=running):
-                    clicked_target = mkey
-        with btn_cols[3]:
-            if st.button("전체 업데이트", width="stretch", key="run_data_store_ALL", disabled=running):
-                clicked_target = "ALL"
-        clear_clicked = st.button("로그 지우기", width="stretch", disabled=running)
+        all_label = "전체 업데이트"
+        if st.session_state.awaiting_update_confirm == "ALL":
+            all_label = "확인: 전체 최신, 다시 눌러 업데이트"
+        if running and len(st.session_state.data_store_target) == len(market_labels):
+            all_label = "전체 업데이트 실행중..."
+        if st.button(all_label, type="primary", width="stretch", key="run_data_store_ALL", disabled=running):
+            clicked_target = "ALL"
+
+        single_market_active = st.session_state.awaiting_update_confirm in market_labels or (
+            running and len(st.session_state.data_store_target) == 1
+        )
+        with st.expander("시장별 업데이트", expanded=single_market_active):
+            btn_cols = st.columns(3)
+            for bcol, (mkey, mlabel) in zip(btn_cols, market_labels.items()):
+                label = f"{mlabel} 업데이트"
+                if st.session_state.awaiting_update_confirm == mkey:
+                    label = f"확인: {mlabel} 최신, 다시 눌러 업데이트"
+                if running and st.session_state.data_store_target == [mkey]:
+                    label = f"{mlabel} 업데이트 실행중..."
+                with bcol:
+                    if st.button(label, width="stretch", key=f"run_data_store_{mkey}", disabled=running):
+                        clicked_target = mkey
+
+        clear_clicked = False
+        if st.session_state.data_store_logs:
+            clear_clicked = st.button("로그 지우기", disabled=running)
 
         if clear_clicked:
             st.session_state.data_store_logs = []
