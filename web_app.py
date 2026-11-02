@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from datetime import date, timedelta
 from random import randint
 from typing import Optional
@@ -2265,11 +2266,13 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
     empty = {
         "cases": {},
         "scan_time": None,
+        "load_error": None,
     }
     if not scan_dir or not os.path.isdir(scan_dir):
         return empty
 
     cases: dict = {}
+    load_error = None
 
     all_breakouts_path = os.path.join(scan_dir, "all_breakouts.csv")
     if os.path.isfile(all_breakouts_path):
@@ -2302,8 +2305,8 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
                         "date": str(row.get("date", "")).strip(),
                     }
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            load_error = f"all_breakouts.csv 읽기 실패: {e}"
 
     charts_root = os.path.join(scan_dir, "charts")
     if os.path.isdir(charts_root):
@@ -2375,7 +2378,25 @@ def load_scan_review_data(scan_dir: Optional[str]) -> dict:
     return {
         "cases": cases,
         "scan_time": os.path.basename(scan_dir).replace("scan_result_", ""),
+        "load_error": load_error,
     }
+
+
+def _format_pct(value, digits: int = 2) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"{float(value):.{digits}f}%"
+
+
+def _move_gallery(idx_key: str, delta: int, last_index: int, clicked_key: str, nonce_key: str) -> None:
+    st.session_state[idx_key] = min(max(int(st.session_state.get(idx_key, 0)) + delta, 0), last_index)
+    # 썸네일 위젯은 마지막 클릭값을 유지해 같은 썸네일을 다시 눌러도 반응하지 않으므로 새로 만든다.
+    if st.session_state.pop(clicked_key, False):
+        st.session_state[nonce_key] = int(st.session_state.get(nonce_key, 0)) + 1
+
+
+def _select_review_case(case_key: str) -> None:
+    st.session_state.review_selected_case = case_key
 
 
 def _render_case_gallery(
@@ -2442,48 +2463,53 @@ def _render_case_gallery(
 
     idx_key = f"gallery_idx_{case_key}"
     gallery_sig_key = f"gallery_sig_{case_key}"
-    thumb_selected_key = f"thumb_selected_idx_{case_key}"
+    thumb_state_key = f"thumb_state_{case_key}"
+    thumb_clicked_key = f"thumb_clicked_{case_key}"
+    thumb_nonce_key = f"thumb_nonce_{case_key}"
+    gallery_codes = "|".join(str(item.get("code", "")) for item in gallery_items)
     current_sig = (
         sort_by,
         max_breakout_pct,
         max_volume_pct,
-        len(gallery_items),
-        str(gallery_items[0].get("code", "")) if gallery_items else "",
-        str(gallery_items[-1].get("code", "")) if gallery_items else "",
+        zlib.crc32(gallery_codes.encode("utf-8")),
     )
 
     if st.session_state.get(gallery_sig_key) != current_sig:
         st.session_state[idx_key] = 0
         st.session_state[gallery_sig_key] = current_sig
-        st.session_state[thumb_selected_key] = 0
+        st.session_state.pop(thumb_clicked_key, None)
 
     current_idx = min(
         max(int(st.session_state.get(idx_key, 0)), 0),
         len(gallery_items) - 1,
     )
     st.session_state[idx_key] = current_idx
-    if thumb_selected_key not in st.session_state or int(st.session_state[thumb_selected_key]) >= len(gallery_items):
-        st.session_state[thumb_selected_key] = int(st.session_state[idx_key])
+    move_args = (len(gallery_items) - 1, thumb_clicked_key, thumb_nonce_key)
 
     nav1, nav2, nav3 = st.columns([1, 1, 4])
     with nav1:
-        if st.button("이전", key=f"prev_{case_key}", disabled=current_idx == 0):
-            st.session_state[idx_key] = max(0, st.session_state[idx_key] - 1)
+        st.button(
+            "이전",
+            key=f"prev_{case_key}",
+            disabled=current_idx == 0,
+            on_click=_move_gallery,
+            args=(idx_key, -1, *move_args),
+        )
     with nav2:
-        if st.button(
+        st.button(
             "다음",
             key=f"next_{case_key}",
             disabled=current_idx == len(gallery_items) - 1,
-        ):
-            st.session_state[idx_key] = min(len(gallery_items) - 1, st.session_state[idx_key] + 1)
+            on_click=_move_gallery,
+            args=(idx_key, 1, *move_args),
+        )
 
-    selected = gallery_items[st.session_state[idx_key]]
+    selected = gallery_items[current_idx]
     code_text = str(selected.get("code", "")).strip()
     name_text = str(selected.get("name", "")).strip()
-    pct_text = float(selected.get("breakout_pct", 0.0))
-    vol_pct = selected.get("volume_pct")
-    vol_text = f"거래량 {float(vol_pct):.1f}%" if vol_pct is not None and not pd.isna(vol_pct) else "거래량 N/A"
-    header_text = f"{code_text} | {name_text} | ▲ {pct_text:.2f}% | {vol_text}"
+    pct_text = _format_pct(selected.get("breakout_pct"))
+    vol_text = f"거래량 {_format_pct(selected.get('volume_pct'), digits=1)}"
+    header_text = f"{code_text} | {name_text} | ▲ {pct_text} | {vol_text}"
     st.markdown(
         "<div style='font-size:0.8rem; color:#5d6a7f; margin:0 0 6px 2px;'>{}</div>".format(
             html.escape(header_text)
@@ -2492,8 +2518,8 @@ def _render_case_gallery(
     )
     st.image(selected["image_path"], width="stretch")
     st.caption(
-        f"{st.session_state[idx_key] + 1}/{len(gallery_items)} | {selected.get('caption', '')} | "
-        f"돌파율 {float(selected.get('breakout_pct', 0.0)):.2f}% | {vol_text}"
+        f"{current_idx + 1}/{len(gallery_items)} | {selected.get('caption', '')} | "
+        f"돌파율 {pct_text} | {vol_text}"
     )
 
     st.markdown("#### 관심종목 저장")
@@ -2516,7 +2542,7 @@ def _render_case_gallery(
         memo_text = st.text_input(
             "메모",
             value="",
-            key=f"review_interest_memo_{case_key}",
+            key=f"review_interest_memo_{case_key}_{code_text}",
         )
         current_watch_path = storage.interest_watch_monthly_path()
         st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
@@ -2563,56 +2589,47 @@ def _render_case_gallery(
     for item in thumb_items:
         thumb_code = str(item.get("code", "")).strip()
         thumb_name = str(item.get("name", "")).strip()
-        thumb_pct = float(item.get("breakout_pct", 0.0))
-        thumb_vol_pct = item.get("volume_pct")
-        thumb_vol_text = f"거래량 {float(thumb_vol_pct):.1f}%" if thumb_vol_pct is not None and not pd.isna(thumb_vol_pct) else "거래량 N/A"
-        thumb_captions.append(f"{thumb_code} | {thumb_name} | ▲ {thumb_pct:.2f}% | {thumb_vol_text}")
+        thumb_pct = _format_pct(item.get("breakout_pct"))
+        thumb_vol_text = f"거래량 {_format_pct(item.get('volume_pct'), digits=1)}"
+        thumb_captions.append(f"{thumb_code} | {thumb_name} | ▲ {thumb_pct} | {thumb_vol_text}")
 
     if thumb_images:
-        current_thumb_index = min(max(int(st.session_state[idx_key]), 0), len(thumb_items) - 1)
-        if thumb_selected_key not in st.session_state:
-            st.session_state[thumb_selected_key] = current_thumb_index
-
+        # 썸네일 부품은 이미지를 처음 한 번만 그리므로 목록이 바뀌면 새 위젯으로 만든다.
+        thumb_widget_key = (
+            f"img_pick_{case_key}_{current_sig[-1]}_{int(st.session_state.get(thumb_nonce_key, 0))}"
+        )
         if IMAGE_SELECT_AVAILABLE:
             picked_thumb = image_select(
                 label="",
                 images=thumb_images,
                 captions=thumb_captions,
-                index=current_thumb_index,
+                index=current_idx,
                 return_value="index",
                 use_container_width=False,
-                key=f"img_pick_{case_key}",
+                key=thumb_widget_key,
             )
-            if picked_thumb is not None:
-                picked_thumb_index = int(picked_thumb)
-                if 0 <= picked_thumb_index < len(thumb_items):
-                    last_thumb_index = int(st.session_state.get(thumb_selected_key, current_thumb_index))
-                    if picked_thumb_index != last_thumb_index:
-                        st.session_state[thumb_selected_key] = picked_thumb_index
-                        if picked_thumb_index != st.session_state[idx_key]:
-                            st.session_state[idx_key] = picked_thumb_index
-                            st.rerun()
-                    else:
-                        # Keep tracker aligned when navigation buttons moved the main index.
-                        st.session_state[thumb_selected_key] = current_thumb_index
         else:
             st.info("썸네일 선택 기능을 사용하려면 streamlit-image-select 패키지를 설치하세요.")
-            picked_idx = st.selectbox(
+            picked_thumb = st.selectbox(
                 "종목 선택",
                 options=list(range(len(thumb_items))),
-                index=current_thumb_index,
+                index=current_idx,
                 format_func=lambda i: thumb_captions[i],
-                key=f"img_pick_fallback_{case_key}",
+                key=thumb_widget_key,
             )
-            last_thumb_index = int(st.session_state.get(thumb_selected_key, current_thumb_index))
-            if 0 <= picked_idx < len(gallery_items):
-                if int(picked_idx) != last_thumb_index:
-                    st.session_state[thumb_selected_key] = int(picked_idx)
-                    if int(picked_idx) != st.session_state[idx_key]:
-                        st.session_state[idx_key] = int(picked_idx)
-                        st.rerun()
-                else:
-                    st.session_state[thumb_selected_key] = current_thumb_index
+
+        # 위젯은 마지막 클릭값을 계속 돌려주므로 값이 바뀌었을 때만 새 클릭으로 처리한다.
+        previous_thumb = st.session_state.get(thumb_state_key)
+        st.session_state[thumb_state_key] = (thumb_widget_key, picked_thumb)
+        is_new_pick = (
+            previous_thumb is not None
+            and previous_thumb[0] == thumb_widget_key
+            and picked_thumb != previous_thumb[1]
+        )
+        if is_new_pick and picked_thumb is not None and picked_thumb != current_idx:
+            st.session_state[idx_key] = int(picked_thumb)
+            st.session_state[thumb_clicked_key] = True
+            st.rerun()
 
 
 START_MENU = "시작화면"
@@ -3316,6 +3333,9 @@ if not st.session_state.show_intro:
         review_data = load_scan_review_data(scan_status["latest_scan_dir"])
         cases = review_data.get("cases", {})
 
+        if review_data.get("load_error"):
+            st.error(review_data["load_error"])
+
         if not cases:
             st.warning("최신 스캔 결과 데이터(all_breakouts/charts)를 찾지 못했습니다.")
         else:
@@ -3429,8 +3449,14 @@ if not st.session_state.show_intro:
                     for key in keys:
                         label = REVIEW_CASE_LABELS.get(key, key)
                         btn_type = "primary" if st.session_state.review_selected_case == key else "secondary"
-                        if st.button(label, key=f"case_sel_{key}", width="stretch", type=btn_type):
-                            st.session_state.review_selected_case = key
+                        st.button(
+                            label,
+                            key=f"case_sel_{key}",
+                            width="stretch",
+                            type=btn_type,
+                            on_click=_select_review_case,
+                            args=(key,),
+                        )
 
             selected_key = st.session_state.review_selected_case
             if selected_key not in cases:

@@ -44,6 +44,12 @@
    - 현재 봉: `close > MA`
 8. 돌파 감지 시 최근 가시 구간 기준 거래량 비율(`volume_pct`) 계산
 
+`_scan_one_stock`은 돌파 봉이 `min_current_bar_date(timeframe)`보다 오래되면 제외합니다.
+
+- 주봉: 이번 주 또는 직전 주 봉까지 인정
+- 월봉: 이번 달 또는 직전 달 봉까지 인정
+- 거래가 없는 동안 남아 있는 옛 봉이 현재 돌파로 잡히는 것을 방지
+
 거래량 비율 계산:
 
 - 케이스별 lookback(`CHART_LOOKBACK_WEEKLY`/`CHART_LOOKBACK_MONTHLY`)를 입력으로 사용

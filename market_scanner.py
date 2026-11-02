@@ -164,6 +164,19 @@ def detect_breakout_up(df: pd.DataFrame, ma_col: str, lookback: Optional[int] = 
     }
 
 
+def min_current_bar_date(timeframe: str, today: Optional[datetime] = None) -> pd.Timestamp:
+    """
+    현재 봉으로 인정하는 가장 오래된 봉 날짜.
+    이번 주/월 또는 직전 주/월 봉까지만 인정한다.
+    (거래가 없는 동안 남아 있는 옛 봉을 현재 돌파로 보지 않기 위함)
+    """
+    base = pd.Timestamp(today if today is not None else datetime.now()).normalize()
+    if timeframe == "weekly":
+        this_friday = base + pd.Timedelta(days=4 - base.weekday())
+        return this_friday - pd.Timedelta(days=7)
+    return base.replace(day=1) - pd.Timedelta(days=1)
+
+
 def _scan_one_stock(row_data: tuple[str, str]) -> list[dict]:
     """
     종목 1개에 대해 모든 케이스를 검사해서 결과 row list 반환
@@ -178,6 +191,8 @@ def _scan_one_stock(row_data: tuple[str, str]) -> list[dict]:
             lookback = CHART_LOOKBACK_WEEKLY if meta["timeframe"] == "weekly" else CHART_LOOKBACK_MONTHLY
             info = detect_breakout_up(df, meta["ma_col"], lookback=lookback)
             if info is None:
+                continue
+            if pd.to_datetime(info["date"]) < min_current_bar_date(meta["timeframe"]):
                 continue
 
             out.append({
