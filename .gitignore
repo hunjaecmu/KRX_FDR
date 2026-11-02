@@ -5,6 +5,7 @@
 /.app_data/data/raw/
 /.app_data/data/tracking/*.csv
 /.app_data/output/
+/.app_data/lite_bundle/
 /portfolio_dashboard.html
 /portfolio_dashboard_data/
 __pycache__/

@@ -87,10 +87,10 @@ class DarkThumbnailTests(unittest.TestCase):
                 (30, 10), Image.NEAREST
             ).save(path)
             uri = thumbnails.dark_thumbnail_data_uri(path, width=30)
-        self.assertTrue(uri.startswith("data:image/png;base64,"))
+        self.assertTrue(uri.startswith("data:image/jpeg;base64,"))
         pixels = np.asarray(Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1]))).convert("RGB"), dtype=int)
         white, red, blue = pixels[5, 3], pixels[5, 15], pixels[5, 25]
-        self.assertLess(white.max(), 30)
+        self.assertLess(white.max(), 40)
         self.assertGreater(red[0], red[2] + 100)
         self.assertGreater(blue[2], blue[0] + 100)
 

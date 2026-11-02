@@ -23,6 +23,12 @@
 python scripts/scan_market.py
 ```
 
+Windows cmd에서는 프로젝트 폴더의 `scan.cmd`로 같은 스캔을 실행합니다.
+
+```bat
+scan
+```
+
 ## 4. 의존성
 
 - market_scanner.py

@@ -6,7 +6,8 @@ import io
 import numpy as np
 from PIL import Image
 
-THUMBNAIL_WIDTH = 320
+THUMBNAIL_WIDTH = 240
+THUMBNAIL_JPEG_QUALITY = 75
 
 
 def dark_thumbnail_data_uri(image_path: str, width: int = THUMBNAIL_WIDTH) -> str:
@@ -23,5 +24,5 @@ def dark_thumbnail_data_uri(image_path: str, width: int = THUMBNAIL_WIDTH) -> st
     dimmed = (hue_kept * 0.92).astype(np.uint8)
 
     buffer = io.BytesIO()
-    Image.fromarray(dimmed).save(buffer, format="PNG", optimize=True)
-    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    Image.fromarray(dimmed).save(buffer, format="JPEG", quality=THUMBNAIL_JPEG_QUALITY)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")

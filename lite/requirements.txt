@@ -1,0 +1,9 @@
+streamlit==1.55.0
+streamlit-image-select==0.6.0
+pandas==2.3.3
+numpy==2.4.3
+pyarrow==23.0.1
+matplotlib==3.10.8
+mplfinance==0.12.10b0
+pillow==11.1.0
+requests==2.32.5
