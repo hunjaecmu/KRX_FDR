@@ -2755,6 +2755,39 @@ def _sync_cloud_data() -> None:
         st.stop()
 
 
+def _render_data_guide() -> None:
+    st.caption("KOSPI, KOSDAQ, 한국 ETF의 시세를 이동평균 기준으로 살펴보는 조회 전용 화면입니다.")
+    review_col, chart_col = st.columns(2)
+    with review_col:
+        with st.container(border=True):
+            st.markdown(
+                f"**{_menu_label('3. 서칭 데이터 조회')}**\n\n"
+                "가장 최근 스캔에서 이동평균선을 상향 돌파한 종목입니다.\n\n"
+                "- **기준:** 주봉 10, 240이평과 월봉 10, 120, 180, 240이평\n"
+                "- **돌파 조건:** 직전 봉 종가가 이평 이하이고 현재 봉 종가가 이평 초과\n"
+                "- **돌파율:** 현재 종가가 이평보다 높은 비율\n"
+                "- **볼륨%:** 현재 봉 거래량 ÷ 최근 53봉의 최대 거래량\n"
+                "- **제외:** ETN, 스팩, 거래량이 없는 봉, 직전 주·월보다 오래된 돌파"
+            )
+    with chart_col:
+        with st.container(border=True):
+            st.markdown(
+                f"**{_menu_label('4. 관심종목 서칭')}**\n\n"
+                "원하는 종목의 과거 차트를 날짜를 지정해 조회합니다.\n\n"
+                "- **대상:** 종목 마스터에 있는 전체 종목\n"
+                "- **봉:** 주봉 또는 월봉, 기준일까지 52봉\n"
+                "- **이동평균:** 5, 10, 20, 120, 180, 240\n"
+                "- **이평 계산:** 거래량이 없는 봉은 제외\n"
+                "- **이동:** 이전 1봉, 다음 1봉"
+            )
+    st.caption(
+        "**데이터의 성격:** 실시간 시세가 아니며, 하루 한 번 수집해 스캔한 결과입니다. 기준 시각은 아래 데이터 현황에서 확인하세요. "
+        "진행 중인 주·월의 봉은 이후 값이 달라져 돌파 여부도 바뀔 수 있습니다. "
+        "분할·병합 등이 있으면 과거 시세가 재조정되지 않았을 수 있습니다. "
+        "참고용 자료이며 투자 권유가 아닙니다."
+    )
+
+
 def _render_workflow_steps(steps: list[dict]) -> None:
     done_count = sum(step["state"] == workflow.DONE for step in steps)
     cards = ""
@@ -2784,6 +2817,8 @@ if st.session_state.show_intro:
     st.title("KRX FDR Lite" if LITE_EDITION else "KRX FDR")
     if not CLOUD_EDITION:
         _render_workflow_steps(workflow.build_steps(data_status, scan_status, date.today()))
+    if LITE_EDITION:
+        _render_data_guide()
     st.markdown("#### 데이터 현황")
     intro_cards = [
         ("KOSPI 종목 수", f"{data_status['kospi_count']:,}"),
