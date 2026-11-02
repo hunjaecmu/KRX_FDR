@@ -33,7 +33,7 @@
 |---|---|---|---|---|
 | 전체 | `streamlit run web_app.py` | 시작화면, 1~8번 | 로컬 CSV | 밝은 테마 |
 | 경량 (`lite`) | `python web_app_lite.py` (포트 8502) | 시작화면, 1~4번 | 로컬 CSV | 터미널 테마 |
-| 서버 (`cloud`) | `lite/streamlit_app.py` | 시작화면, 돌파 종목 조회, 종목 차트 조회 | 내려받은 묶음 | 터미널 테마 |
+| 서버 (`cloud`) | `lite/streamlit_app.py` | 시작화면, 돌파 종목 조회, 종목 차트 조회, 주요 종목 | 내려받은 묶음 | 터미널 테마 |
 
 - 경량과 서버 버전에는 관심저장 기능이 없습니다.
 - 서버 버전에는 데이터 업데이트와 스캔 메뉴도 없습니다.
@@ -84,7 +84,7 @@
 | 묶음 내 경로 | 내용 |
 |---|---|
 | `data/master/kospi_tickers.csv` | 종목 마스터 |
-| `data/lite/prices.parquet` | 마스터 종목의 주봉·월봉 (약 214만 행) |
+| `data/lite/prices.parquet` | 마스터 종목의 주봉·월봉 (약 214만 행), KOSPI·KOSDAQ 지수 주봉 |
 | `data/lite/manifest.json` | 생성 시각, 스캔 이름, 데이터 현황 |
 | `output/scan_result_*/` | 최신 스캔 결과와 차트 PNG |
 

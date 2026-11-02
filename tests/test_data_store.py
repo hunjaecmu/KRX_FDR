@@ -110,6 +110,35 @@ class UpdateOneRawStockTests(unittest.TestCase):
         fetch.assert_not_called()
 
 
+class UpdateIndicesTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.dir = temp.name
+        for patcher in (
+            mock.patch.object(ds, "INDEX_WEEKLY_DIR", self.dir),
+            mock.patch.object(ds, "ensure_dirs"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_saves_weekly_files(self):
+        with mock.patch.object(ds, "fetch_ohlcv_with_retry", return_value=fetched(["2026-11-02", "2026-11-03"])):
+            ds.update_indices()
+        self.assertEqual(sorted(os.listdir(self.dir)), ["KQ11_KOSDAQ.csv", "KS11_KOSPI.csv"])
+
+    def test_failure_keeps_existing_file_and_continues(self):
+        existing = os.path.join(self.dir, "KS11_KOSPI.csv")
+        with open(existing, "w", encoding="utf-8") as f:
+            f.write("old")
+        fetch = mock.Mock(side_effect=[RuntimeError("down"), fetched(["2026-11-02"])])
+        with mock.patch.object(ds, "fetch_ohlcv_with_retry", fetch):
+            ds.update_indices()
+        with open(existing, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "old")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "KQ11_KOSDAQ.csv")))
+
+
 class GenerateDerivedAllTests(unittest.TestCase):
     def test_parallel_failure_of_pool_falls_back_to_sequential(self):
         from concurrent.futures.process import BrokenProcessPool

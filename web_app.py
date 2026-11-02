@@ -29,6 +29,7 @@ from config import (
     TRACKING_INPUT_DIR,
     HOLDINGS_CSV,
     RECORD_FILE_OPTIONS,
+    INDEX_TICKERS,
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
 from historical_chart_viewer import LOOKBACK_BARS, build_historical_chart_figure
@@ -2301,6 +2302,62 @@ def _move_gallery(idx_key: str, delta: int, last_index: int, clicked_key: str, n
         st.session_state[nonce_key] = int(st.session_state.get(nonce_key, 0)) + 1
 
 
+def _select_major_stock(code: str) -> None:
+    st.session_state.major_stock_code = code
+
+
+def _available_major_indexes() -> list[tuple[str, str]]:
+    manifest = lite_data.load_manifest(DATA_DIR) or {}
+    codes = manifest.get("indices", [])
+    return [(code, name) for code, name in INDEX_TICKERS if code in codes]
+
+
+def _render_major_buttons(title: str, items: list[tuple[str, str]], selected_code: Optional[str]) -> None:
+    st.markdown(f"<div class='case-grid-title'>{title}</div>", unsafe_allow_html=True)
+    for col, (code, name) in zip(st.columns(len(MAJOR_STOCKS)), items):
+        with col:
+            st.button(
+                name,
+                key=f"major_stock_{code}",
+                width="stretch",
+                type="primary" if code == selected_code else "secondary",
+                on_click=_select_major_stock,
+                args=(code,),
+            )
+
+
+def _render_major_stocks() -> None:
+    selected_code = st.session_state.get("major_stock_code")
+    indexes = _available_major_indexes()
+    _render_major_buttons("종목", MAJOR_STOCKS, selected_code)
+    if indexes:
+        _render_major_buttons("지수", indexes, selected_code)
+
+    if not selected_code:
+        st.caption("버튼을 누르면 주봉 차트가 표시됩니다.")
+        return
+
+    name = dict(MAJOR_STOCKS + indexes).get(selected_code)
+    if name is None:
+        st.warning("선택한 항목의 데이터가 없습니다.")
+        return
+    try:
+        # 진행 중인 주의 봉은 이번 주 금요일 날짜이므로 기준일을 넉넉히 뒤로 잡아 최신 봉까지 포함한다.
+        fig, anchor_date = build_historical_chart_figure(
+            code=selected_code,
+            name=name,
+            timeframe="weekly",
+            target_date=pd.Timestamp(date.today()) + pd.Timedelta(days=7),
+            lookback_bars=LOOKBACK_BARS,
+        )
+    except Exception as e:
+        st.error(f"{name} 차트를 불러오지 못했습니다: {e}")
+        return
+
+    st.caption(f"{name} ({selected_code}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | 주봉 {LOOKBACK_BARS}봉")
+    st.pyplot(fig, width="stretch")
+
+
 def _select_review_case(case_key: str) -> None:
     st.session_state.review_selected_case = case_key
 
@@ -2544,6 +2601,12 @@ def _render_case_gallery(
 
 
 START_MENU = "시작화면"
+MAJOR_STOCKS_MENU = "주요 종목"
+MAJOR_STOCKS = [
+    ("005930", "삼성전자"),
+    ("000660", "SK하이닉스"),
+    ("009150", "삼성전기"),
+]
 
 FULL_MENU_ITEMS = [
     START_MENU,
@@ -2555,14 +2618,15 @@ FULL_MENU_ITEMS = [
     "6. 패턴 데이터 입력",
     "7. 패턴 데이터 조회",
     "8. 보유 종목 조회",
+    MAJOR_STOCKS_MENU,
 ]
 
 if CLOUD_EDITION:
-    MENU_ITEMS = [START_MENU, "3. 서칭 데이터 조회", "4. 관심종목 서칭"]
+    MENU_ITEMS = [START_MENU, "3. 서칭 데이터 조회", "4. 관심종목 서칭", MAJOR_STOCKS_MENU]
 elif LITE_EDITION:
     MENU_ITEMS = FULL_MENU_ITEMS[:5]
 else:
-    MENU_ITEMS = FULL_MENU_ITEMS
+    MENU_ITEMS = FULL_MENU_ITEMS[:9]
 
 REVIEW_CASE_ORDER = [
     "weekly_ma10_breakout",
@@ -2615,6 +2679,7 @@ MENU_ICONS = {
     "6. 패턴 데이터 입력": ":material/edit_note:",
     "7. 패턴 데이터 조회": ":material/history:",
     "8. 보유 종목 조회": ":material/account_balance_wallet:",
+    MAJOR_STOCKS_MENU: ":material/star:",
 }
 
 MENU_GROUPS = [
@@ -2632,7 +2697,7 @@ LITE_MENU_GROUPS = [
 
 CLOUD_MENU_GROUPS = [
     (None, [START_MENU]),
-    ("조회", ["3. 서칭 데이터 조회", "4. 관심종목 서칭"]),
+    ("조회", ["3. 서칭 데이터 조회", "4. 관심종목 서칭", MAJOR_STOCKS_MENU]),
 ]
 
 # 경량 버전은 저장 기능이 없어 4번 메뉴를 차트 조회로 표시한다.
@@ -2655,6 +2720,7 @@ FEATURE_HELP = {
     "6. 패턴 데이터 입력": "개별 종목 조회 후 기록 데이터로 저장합니다.",
     "7. 패턴 데이터 조회": "저장된 패턴(기록) 데이터를 조회합니다.",
     "8. 보유 종목 조회": "보유 종목 데이터를 조회합니다.",
+    MAJOR_STOCKS_MENU: "주요 종목과 시장 지수의 최근 주봉 차트를 조회합니다.",
 }
 if LITE_EDITION:
     FEATURE_HELP["4. 관심종목 서칭"] = "개별 종목의 주봉/월봉 차트를 조회합니다."
@@ -2780,6 +2846,12 @@ def _render_data_guide() -> None:
                 "- **이평 계산:** 거래량이 없는 봉은 제외\n"
                 "- **이동:** 이전 1봉, 다음 1봉"
             )
+    if CLOUD_EDITION:
+        index_names = [name for _, name in _available_major_indexes()]
+        major_targets = ", ".join(name for _, name in MAJOR_STOCKS)
+        if index_names:
+            major_targets += f"와 {', '.join(index_names)} 지수"
+        st.caption(f"**{MAJOR_STOCKS_MENU}:** {major_targets}의 최근 주봉 차트를 바로 볼 수 있습니다.")
     st.caption(
         "**데이터의 성격:** 실시간 시세가 아니며, 하루 한 번 수집해 스캔한 결과입니다. 기준 시각은 아래 데이터 현황에서 확인하세요. "
         "진행 중인 주·월의 봉은 이후 값이 달라져 돌파 여부도 바뀔 수 있습니다. "
@@ -3245,6 +3317,8 @@ if not st.session_state.show_intro:
                 max_volume_pct=max_volume_pct,
                 sort_by=sort_by,
             )
+    elif selected_menu == MAJOR_STOCKS_MENU:
+        _render_major_stocks()
     elif selected_menu == "4. 관심종목 서칭":
         _render_stock_lookup_panel(save_mode="interest")
     elif selected_menu == "5. 관심종목 조회":

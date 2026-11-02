@@ -9,6 +9,9 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 from streamlit.testing.v1 import AppTest
@@ -43,6 +46,12 @@ def write_source_data(data_dir: str, output_dir: str) -> None:
         f.write(b"png")
     with open(os.path.join(os.path.dirname(os.path.dirname(scan)), "all_breakouts.csv"), "w", encoding="utf-8") as f:
         f.write("scan_case\n")
+    index_dir = os.path.join(data_dir, "index", "weekly")
+    os.makedirs(index_dir)
+    for code, name in (("KS11", "KOSPI"), ("KQ11", "KOSDAQ")):
+        shutil.copy(
+            os.path.join(data_dir, "derived", "weekly", "000001_가.csv"), os.path.join(index_dir, f"{code}_{name}.csv")
+        )
 
 
 class SourceDataTestCase(unittest.TestCase):
@@ -58,6 +67,7 @@ class SourceDataTestCase(unittest.TestCase):
             "MASTER_FILE": os.path.join(self.src_data, "master", "kospi_tickers.csv"),
             "DERIVED_WEEKLY_DIR": os.path.join(self.src_data, "derived", "weekly"),
             "DERIVED_MONTHLY_DIR": os.path.join(self.src_data, "derived", "monthly"),
+            "INDEX_WEEKLY_DIR": os.path.join(self.src_data, "index", "weekly"),
         }.items():
             patcher = mock.patch.object(data_loader, attr, value)
             patcher.start()
@@ -74,7 +84,7 @@ class BundleTests(SourceDataTestCase):
         self.assertIn("data/lite/prices.parquet", names)
         self.assertIn("data/master/kospi_tickers.csv", names)
         self.assertIn("output/scan_result_20261102_100000/all_breakouts.csv", names)
-        self.assertEqual(self.manifest["price_rows"], 8)
+        self.assertEqual(self.manifest["price_rows"], 12)
 
     def test_personal_tracking_files_are_never_included(self):
         with zipfile.ZipFile(self.bundle) as bundle:
@@ -96,6 +106,13 @@ class BundleTests(SourceDataTestCase):
             from_parquet[from_csv.columns].astype(object), from_csv.astype(object), check_dtype=False
         )
         self.assertEqual(from_parquet["is_final"].tolist(), [True, False])
+
+    def test_index_codes_load_from_parquet_and_csv_without_padding(self):
+        lite_data.install_bundle(self.bundle, self.dst_data, self.dst_output, 1)
+        with mock.patch.object(data_loader, "PRICES_PARQUET", os.path.join(self.dst_data, "lite", "prices.parquet")), \
+                mock.patch.object(data_loader, "USE_PARQUET", True):
+            self.assertEqual(len(data_loader.load_weekly("KS11")), 2)
+        self.assertEqual(len(data_loader.load_weekly("KQ11")), 2)
 
     def test_rejects_paths_outside_target(self):
         evil = os.path.join(self.root, "evil.zip")
@@ -195,6 +212,7 @@ class CloudEditionTests(SourceDataTestCase):
         manifest_path = os.path.join(self.dst_data, "lite", "manifest.json")
         with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
+        self.assertEqual(manifest["indices"], ["KS11", "KQ11"])
         manifest["data_status"] = {
             "kospi_count": 1, "kosdaq_count": 0, "latest_trade_date": "2026-11-02",
             "latest_collection_date": "2026-11-02", "latest_collection_time": "20:00", "daily_file_count": 2, "markets": {},
@@ -209,7 +227,30 @@ class CloudEditionTests(SourceDataTestCase):
                 mock.patch.object(lite_data, "ensure_data", return_value=False):
             at = AppTest.from_file(os.path.join(ROOT, "lite", "streamlit_app.py"), default_timeout=60).run()
         self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
-        self.assertEqual([b.label for b in at.sidebar.button], ["시작화면", "돌파 종목 조회", "종목 차트 조회"])
+        self.assertEqual(
+            [b.label for b in at.sidebar.button], ["시작화면", "돌파 종목 조회", "종목 차트 조회", "주요 종목"]
+        )
+
+        fig = plt.figure(figsize=(0.2, 0.2))
+        chart = mock.Mock(return_value=(fig, pd.Timestamp("2026-11-06")))
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("config.DATA_DIR", self.dst_data), \
+                mock.patch("config.OUTPUT_DIR", self.dst_output), \
+                mock.patch.object(lite_data, "ensure_data", return_value=False), \
+                mock.patch("historical_chart_viewer.build_historical_chart_figure", chart):
+            at = AppTest.from_file(os.path.join(ROOT, "lite", "streamlit_app.py"), default_timeout=60)
+            at.query_params["menu"] = "9"
+            at.run()
+            self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
+            chart.assert_not_called()
+            labels = [b.label for b in at.main.button]
+            self.assertEqual(labels, ["삼성전자", "SK하이닉스", "삼성전기", "KOSPI", "KOSDAQ"])
+
+            at.button(key="major_stock_009150").click().run()
+        self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
+        self.assertEqual(chart.call_args.kwargs["code"], "009150")
+        self.assertEqual(chart.call_args.kwargs["timeframe"], "weekly")
+        self.assertEqual(at.button(key="major_stock_009150").proto.type, "primary")
 
 
 if __name__ == "__main__":

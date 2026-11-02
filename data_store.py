@@ -12,7 +12,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import pandas as pd
 import FinanceDataReader as fdr
-from config import DATA_DIR
+from config import DATA_DIR, INDEX_TICKERS
 
 # =========================================================
 # 설정
@@ -23,6 +23,7 @@ RAW_DAILY_DIR = os.path.join(DATA_DIR, "raw", "daily")
 DERIVED_DAILY_DIR = os.path.join(DATA_DIR, "derived", "daily")
 DERIVED_WEEKLY_DIR = os.path.join(DATA_DIR, "derived", "weekly")
 DERIVED_MONTHLY_DIR = os.path.join(DATA_DIR, "derived", "monthly")
+INDEX_WEEKLY_DIR = os.path.join(DATA_DIR, "index", "weekly")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 MASTER_FILE = os.path.join(MASTER_DIR, "kospi_tickers.csv")
@@ -52,6 +53,7 @@ def ensure_dirs() -> None:
     os.makedirs(DERIVED_DAILY_DIR, exist_ok=True)
     os.makedirs(DERIVED_WEEKLY_DIR, exist_ok=True)
     os.makedirs(DERIVED_MONTHLY_DIR, exist_ok=True)
+    os.makedirs(INDEX_WEEKLY_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
 
 
@@ -853,6 +855,21 @@ def generate_derived_for_one_stock(code: str, name: str) -> Dict:
 # =========================================================
 # 전체 실행
 # =========================================================
+def update_indices() -> None:
+    """시장 지수의 주봉을 새로 만든다. 실패하면 기존 파일을 유지한다."""
+    ensure_dirs()
+    run_meta = get_run_metadata()
+    for code, name in INDEX_TICKERS:
+        try:
+            raw_df = fetch_ohlcv_with_retry(code, initial_start_date(), today_str("%Y-%m-%d"), metadata=run_meta)
+            if raw_df.empty:
+                raise ValueError("조회 결과가 없습니다.")
+            save_derived_file(os.path.join(INDEX_WEEKLY_DIR, f"{code}_{name}.csv"), build_weekly_derived(raw_df))
+            print(f"[INDEX] {name} 주봉 저장 완료")
+        except Exception as e:
+            print(f"[INDEX][WARN] {name} 갱신 실패: {e}")
+
+
 def market_group(market: str) -> str:
     m = str(market).upper().strip()
     if m.startswith("KOSDAQ"):
@@ -999,6 +1016,9 @@ def run_all(
 
     derived_result_df = pd.DataFrame(derived_results)
     derived_sec = time.perf_counter() - derived_started
+
+    if set(selected) == {"KOSPI", "KOSDAQ", "ETF"}:
+        update_indices()
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_log_file = os.path.join(LOG_DIR, f"raw_update_result_{ts}.csv")
