@@ -1249,6 +1249,7 @@ def _render_saved_pattern_data() -> None:
                         origin_date_text=str(state.get("origin_target_date", state["target_date"])),
                         # 월봉은 240이평 데이터가 없어도 범례에 NaN으로 보여준다.
                         required_mas=("ma240",) if state["timeframe"] == "monthly" else (),
+                        close_trail_bars=10,
                     )
                     state["target_date"] = anchor_date.strftime("%Y-%m-%d")
                     st.session_state[chart_state_key] = state
@@ -1409,6 +1410,7 @@ def _build_stock_chart(
     origin_date_text: Optional[str] = None,
     buy_price: Optional[float] = None,
     required_mas: tuple[str, ...] = (),
+    close_trail_bars: int = 0,
 ):
     """차트를 준비해 (표시 함수, 기준봉 날짜)를 돌려준다."""
     target_date = pd.to_datetime(target_date_text)
@@ -1450,6 +1452,7 @@ def _build_stock_chart(
         price_lines=price_lines,
         marker_date=marker_date,
         required_mas=required_mas,
+        close_trail_bars=close_trail_bars,
     )
     chart_html = tv_chart.render_html(payload, theme=tv_chart.DARK_THEME if LITE_EDITION else tv_chart.LIGHT_THEME)
     return (lambda: components.html(chart_html, height=tv_chart.CHART_HEIGHT)), pd.to_datetime(payload["anchor"])
@@ -2438,6 +2441,28 @@ def _render_major_stocks() -> None:
     show_chart()
 
 
+def _passes_review_filter(item: dict, max_breakout_pct: Optional[float], max_volume_pct: Optional[float]) -> bool:
+    # 돌파율이 없는 종목(차트만 있는 스캔)은 최대 필터를 쓸 때만 뺀다.
+    pct = item.get("breakout_pct")
+    has_pct = pct is not None and not pd.isna(pct)
+    if has_pct and float(pct) < MIN_REVIEW_BREAKOUT_PCT:
+        return False
+    if max_breakout_pct is not None and (not has_pct or float(pct) > float(max_breakout_pct)):
+        return False
+
+    vol = item.get("volume_pct")
+    if max_volume_pct is not None:
+        if vol is None or pd.isna(vol) or float(vol) > float(max_volume_pct):
+            return False
+    return True
+
+
+def _breakout_filter_text(max_breakout_pct: Optional[float]) -> str:
+    if max_breakout_pct is None:
+        return f">= {MIN_REVIEW_BREAKOUT_PCT:.1f}%"
+    return f"{MIN_REVIEW_BREAKOUT_PCT:.1f}% ~ {max_breakout_pct:.1f}%"
+
+
 def _select_review_case(case_key: str) -> None:
     st.session_state.review_selected_case = case_key
 
@@ -2453,32 +2478,17 @@ def _render_case_gallery(
     if sort_by == "code":
         items = sorted(items, key=lambda x: (str(x.get("code", "")), str(x.get("name", ""))))
     else:
+        # 강도가 큰 종목부터, 강도가 없는 종목은 맨 뒤
         items = sorted(
             items,
             key=lambda x: (
-                999999 if x.get("breakout_strength") is None or pd.isna(x.get("breakout_strength")) else float(x.get("breakout_strength")),
+                x.get("breakout_strength") is None or pd.isna(x.get("breakout_strength")),
+                0.0 if x.get("breakout_strength") is None or pd.isna(x.get("breakout_strength")) else -float(x.get("breakout_strength")),
                 str(x.get("code", "")),
             ),
         )
 
-    filtered_items = []
-    for item in items:
-        pct = item.get("breakout_pct")
-        vol = item.get("volume_pct")
-
-        if max_breakout_pct is not None:
-            if pct is None or pd.isna(pct):
-                continue
-            if float(pct) > float(max_breakout_pct):
-                continue
-
-        if max_volume_pct is not None:
-            if vol is None or pd.isna(vol):
-                continue
-            if float(vol) > float(max_volume_pct):
-                continue
-
-        filtered_items.append(item)
+    filtered_items = [item for item in items if _passes_review_filter(item, max_breakout_pct, max_volume_pct)]
 
     # Keep gallery navigation/indexing on image-available items only.
     gallery_items = [
@@ -2487,7 +2497,7 @@ def _render_case_gallery(
         if item.get("image_path") and os.path.isfile(item["image_path"])
     ]
 
-    breakout_filter_text = "필터 없음" if max_breakout_pct is None else f"<= {max_breakout_pct:.1f}%"
+    breakout_filter_text = _breakout_filter_text(max_breakout_pct)
     volume_filter_text = "필터 없음" if max_volume_pct is None else f"<= {max_volume_pct:.1f}%"
 
     st.markdown(f"#### {case_label}")
@@ -2568,6 +2578,7 @@ def _render_case_gallery(
             name_text,
             _infer_timeframe_from_case_key(case_key),
             str(selected.get("date", "")).strip(),
+            close_trail_bars=10,
         )
         show_review_chart()
     except (ValueError, KeyError, TypeError, FileNotFoundError):
@@ -2721,6 +2732,9 @@ elif LITE_EDITION:
     MENU_ITEMS = FULL_MENU_ITEMS[:5] + [GUIDE_MENU]
 else:
     MENU_ITEMS = FULL_MENU_ITEMS[:9] + [GUIDE_MENU]
+
+# 서칭 데이터 조회에서 이 돌파율(%) 미만은 보여주지 않는다.
+MIN_REVIEW_BREAKOUT_PCT = 0.5
 
 REVIEW_CASE_ORDER = [
     "weekly_ma10_breakout",
@@ -3302,7 +3316,7 @@ if not st.session_state.show_intro:
             with ctl2:
                 breakout_filter_opt = st.selectbox(
                     "돌파율 필터",
-                    options=["필터 없음", "최대 0.5%", "최대 1.0%", "최대 2.0%", "최대 3.0%", "최대 5.0%", "최대 10.0%"],
+                    options=["필터 없음", "최대 1.0%", "최대 2.0%", "최대 3.0%", "최대 5.0%", "최대 10.0%"],
                     index=0,
                 )
             with ctl3:
@@ -3320,7 +3334,7 @@ if not st.session_state.show_intro:
             if volume_filter_opt != "필터 없음":
                 max_volume_pct = float(volume_filter_opt.replace("최대", "").replace("%", "").strip())
 
-            filter_desc_breakout = "필터 없음" if max_breakout_pct is None else f"<= {max_breakout_pct:.1f}%"
+            filter_desc_breakout = _breakout_filter_text(max_breakout_pct)
             filter_desc_volume = "필터 없음" if max_volume_pct is None else f"<= {max_volume_pct:.1f}%"
 
             overview_rows = []
@@ -3338,17 +3352,7 @@ if not st.session_state.show_intro:
             sorted_cases = [(case_key, cases[case_key]) for case_key in ordered_case_keys]
             for case_key, payload in sorted_cases:
                 items = payload.get("items", [])
-                filtered = []
-                for x in items:
-                    x_pct = x.get("breakout_pct")
-                    x_vol = x.get("volume_pct")
-                    if max_breakout_pct is not None:
-                        if x_pct is None or pd.isna(x_pct) or float(x_pct) > float(max_breakout_pct):
-                            continue
-                    if max_volume_pct is not None:
-                        if x_vol is None or pd.isna(x_vol) or float(x_vol) > float(max_volume_pct):
-                            continue
-                    filtered.append(x)
+                filtered = [x for x in items if _passes_review_filter(x, max_breakout_pct, max_volume_pct)]
 
                 total_all += len(items)
                 total_filtered += len(filtered)

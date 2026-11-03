@@ -19,7 +19,7 @@ Streamlit Community Cloud에 배포한 경량 버전이 사용할 데이터 묶�
 
 다음 작업이 성공적으로 끝나면 자동으로 실행됩니다.
 
-- 전체 데이터 업데이트 (웹 앱의 전체 업데이트, `scripts/update_data.py`)
+- 전체 데이터 업데이트 (웹 앱의 전체 업데이트, `update.cmd`, `scripts/update_data.py`)
 - 스캔 (웹 앱의 2번 메뉴, `scan.cmd`, `scripts/scan_market.py`)
 
 `run_evening_scan.py`에서는 자동으로 실행되지 않습니다.

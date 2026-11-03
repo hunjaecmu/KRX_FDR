@@ -21,6 +21,12 @@
 python scripts/update_data.py
 ```
 
+Windows cmd에서는 프로젝트 폴더의 `update.cmd`로 같은 업데이트를 실행합니다. 스캔(`scan.cmd`)은 시세를 받지 않으므로, 업데이트를 먼저 실행한 뒤 스캔합니다.
+
+```bat
+update
+```
+
 ## 3. 콘솔 출력
 
 - 실행 시작/완료 메시지
