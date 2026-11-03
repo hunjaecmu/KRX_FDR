@@ -28,10 +28,12 @@ class FakeImageSelect:
     def __init__(self):
         self.clicked = {}
         self.keys = []
+        self.captions = []
 
     def __call__(self, label, images, captions=None, index=0, use_container_width=True,
                  return_value="original", key=None):
         self.keys.append(key)
+        self.captions.append(list(captions or []))
         return self.clicked.get(key, index)
 
     def click(self, value):
@@ -49,10 +51,11 @@ class ReviewGalleryTests(unittest.TestCase):
         for case in (CASE, OTHER_CASE):
             chart_dir = os.path.join(scan, "charts", case)
             os.makedirs(chart_dir)
-        for i in range(10):
+        for i in range(11):
             code = f"{i + 1:06d}"
             # The last two are swapped so that strength order differs from code order.
-            pct = {8: 10, 9: 9}.get(i, i + 1) * 0.8
+            # The 11th is below the minimum breakout and must not be shown.
+            pct = {8: 10, 9: 9, 10: 0.5}.get(i, i + 1) * 0.8
             rows.append({
                 "scan_case": CASE, "scan_label": "주봉 10이평 돌파", "code": code, "name": f"종목{i}",
                 "date": "2026-11-06", "breakout_strength": pct / 100, "breakout_pct": pct, "volume_pct": 10.0,
@@ -101,7 +104,8 @@ class ReviewGalleryTests(unittest.TestCase):
         self.click_thumb(3)
         self.next()
         self.at.button(key=f"review_interest_save_{CASE}").click().run()
-        self.assertEqual(self.saved[-1]["종목코드"], "000005")
+        # 강도 내림차순: 000009, 000010, 000008, 000007, 000006, ...
+        self.assertEqual(self.saved[-1]["종목코드"], "000006")
         self.assertEqual(self.idx, 4)
         self.assertEqual(len(self.at.success), 1)
 
@@ -140,9 +144,15 @@ class ReviewGalleryTests(unittest.TestCase):
         self.assertEqual(self.at.button(key=f"case_sel_{CASE}").proto.type, "secondary")
 
     def test_memo_does_not_carry_over_to_next_stock(self):
-        self.at.text_input(key=f"review_interest_memo_{CASE}_000001").input("A 메모").run()
+        self.at.text_input(key=f"review_interest_memo_{CASE}_000009").input("A 메모").run()
         self.next()
-        self.assertEqual(self.at.text_input(key=f"review_interest_memo_{CASE}_000002").value, "")
+        self.assertEqual(self.at.text_input(key=f"review_interest_memo_{CASE}_000010").value, "")
+
+    def test_strength_sort_is_descending_and_hides_small_breakouts(self):
+        codes = [caption.split(" | ")[0] for caption in self.fake.captions[-1]]
+        self.assertEqual(codes[:3], ["000009", "000010", "000008"])
+        self.assertEqual(codes[-1], "000001")
+        self.assertNotIn("000011", codes)
 
 
 class ChartsOnlyScanTests(unittest.TestCase):

@@ -58,6 +58,14 @@ class BuildPayloadTests(unittest.TestCase):
         self.assertEqual(payload["moving_averages"]["MA10"]["data"], [])
         self.assertEqual(payload["moving_averages"]["MA240"]["data"], [])
 
+    def test_close_trail_uses_last_closes_up_to_target(self):
+        payload = self.payload(close_trail_bars=2)
+        self.assertEqual(payload["close_trail"], [
+            {"time": "2026-10-23", "value": 105.0},
+            {"time": "2026-10-30", "value": 130.0},
+        ])
+        self.assertEqual(self.payload()["close_trail"], [])
+
     def test_marker_moves_to_last_bar_on_or_before_date(self):
         payload = self.payload(marker_date=pd.Timestamp("2026-10-20"))
         self.assertEqual(payload["markers"][0]["time"], "2026-10-16")
@@ -111,6 +119,14 @@ class RenderHtmlTests(unittest.TestCase):
     def test_missing_moving_average_value_shows_nan(self):
         payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2, required_mas=("ma240",))
         self.assertIn('"NaN"', tv_chart.render_html(payload))
+
+    def test_close_trail_is_dashed_like_ma10_width(self):
+        payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2, close_trail_bars=10)
+        rendered = tv_chart.render_html(payload)
+        self.assertIn("lineWidth: 2, lineStyle: L.LineStyle.Dashed", rendered)
+        # 같은 두께와 점선 간격으로 경계선에 한 번 더 그린다.
+        self.assertIn('shape.setAttribute("stroke-width", "2")', rendered)
+        self.assertIn('shape.setAttribute("stroke-dasharray", "4 4")', rendered)
 
     def test_attribution_logo_stays_on(self):
         payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2)

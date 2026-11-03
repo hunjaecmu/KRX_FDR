@@ -331,6 +331,11 @@ a.flow-step:hover {
 }
 
 /* Menu 7: stock info stays on one line; a long memo wraps below it. */
+.st-key-pattern_records [role="radiogroup"] label {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .st-key-pattern_records [role="radiogroup"] label > div:last-child {
   min-width: 0;
 }

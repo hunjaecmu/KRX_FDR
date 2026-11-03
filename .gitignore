@@ -7,6 +7,7 @@
 /.app_data/output/
 /.app_data/lite_bundle/
 /.app_data/data/index/
+/.app_data/data/lite/
 /portfolio_dashboard.html
 /portfolio_dashboard_data/
 __pycache__/

@@ -58,10 +58,12 @@ def build_payload(
     price_lines: Optional[list[dict]] = None,
     marker_date: Optional[pd.Timestamp] = None,
     required_mas: tuple[str, ...] = (),
+    close_trail_bars: int = 0,
 ) -> dict:
     """기준일까지의 봉만 넣는다. 복기할 때 이후 시세가 보이지 않도록 하기 위함이다.
 
     required_mas의 이평선은 값이 없어도 범례에 NaN으로 표시한다.
+    close_trail_bars가 있으면 마지막 그 개수만큼의 종가를 점선으로 잇는다.
     """
     work = df.copy()
     work["date"] = pd.to_datetime(work["date"], errors="coerce")
@@ -110,6 +112,9 @@ def build_payload(
         "visible_bars": int(visible_bars),
         "price_lines": price_lines or [],
         "markers": markers,
+        "close_trail": [
+            {"time": c["time"], "value": c["close"]} for c in candles[-int(close_trail_bars):]
+        ] if close_trail_bars > 0 else [],
     }
 
 
@@ -155,12 +160,45 @@ for (const [name, ma] of Object.entries(P.moving_averages)) {{
   line.setData(ma.data);
   maSeries[name] = {{ line, color: ma.color, last: ma.data.length ? ma.data[ma.data.length - 1].value : null }};
 }}
+let trailSeries = null;
+if (P.close_trail.length) {{
+  trailSeries = chart.addSeries(L.LineSeries, {{ color: T.guide, lineWidth: 2, lineStyle: L.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }});
+  trailSeries.setData(P.close_trail);
+}}
 let volumeSeries = null;
 if (P.volumes.length) {{
   volumeSeries = chart.addSeries(L.HistogramSeries, {{ priceFormat: {{ type: "volume" }}, priceLineVisible: false, lastValueVisible: false }}, 1);
   volumeSeries.setData(P.volumes.map(v => ({{ time: v.time, value: v.value, color: v.rising ? T.up : T.down }})));
   chart.panes()[0].setStretchFactor(4);
   chart.panes()[1].setStretchFactor(1);
+}}
+// 종가 점선과 같은 모양을 가장 낮은 점이 가격·거래량 경계선에 닿도록 내려서 한 번 더 그린다.
+if (trailSeries && volumeSeries) {{
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.style.cssText = "position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; overflow: hidden;";
+  const shape = document.createElementNS(svgNS, "polyline");
+  shape.setAttribute("fill", "none");
+  shape.setAttribute("stroke", T.guide);
+  shape.setAttribute("stroke-width", "2");
+  shape.setAttribute("stroke-dasharray", "4 4");
+  svg.appendChild(shape);
+  container.appendChild(svg);
+  const drawBoundaryTrail = () => {{
+    const boundary = chart.panes()[0].getHeight();
+    svg.setAttribute("width", chart.timeScale().width());
+    svg.setAttribute("height", boundary + 2);
+    const points = P.close_trail
+      .map(p => [chart.timeScale().timeToCoordinate(p.time), trailSeries.priceToCoordinate(p.value)])
+      .filter(([x, y]) => x !== null && y !== null);
+    if (points.length < 2) {{ shape.setAttribute("points", ""); return; }}
+    const shift = boundary - Math.max(...points.map(([, y]) => y));
+    shape.setAttribute("points", points.map(([x, y]) => x + "," + (y + shift)).join(" "));
+  }};
+  const redrawBoundaryTrail = () => requestAnimationFrame(drawBoundaryTrail);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(redrawBoundaryTrail);
+  chart.subscribeCrosshairMove(redrawBoundaryTrail);
+  new ResizeObserver(redrawBoundaryTrail).observe(container);
 }}
 for (const item of P.price_lines) {{
   candles.createPriceLine({{ price: item.price, color: item.color || T.guide, lineWidth: 1, lineStyle: L.LineStyle.Solid, axisLabelVisible: true, title: item.title || "" }});
