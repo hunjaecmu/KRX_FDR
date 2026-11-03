@@ -124,7 +124,7 @@ class ReviewGalleryTests(unittest.TestCase):
 
     def test_sort_change_recreates_thumbnails(self):
         key_before = self.fake.keys[-1]
-        self.at.selectbox[0].select("코드순").run()
+        self.at.selectbox[0].select("종목코드 오름차순").run()
         self.assertNotEqual(self.fake.keys[-1], key_before)
 
     def test_previous_button_enabled_right_after_next(self):
@@ -153,6 +153,17 @@ class ReviewGalleryTests(unittest.TestCase):
         self.assertEqual(codes[:3], ["000009", "000010", "000008"])
         self.assertEqual(codes[-1], "000001")
         self.assertNotIn("000011", codes)
+
+    def test_other_sort_orders(self):
+        self.at.selectbox[0].select("돌파율 오름차순").run()
+        codes = [caption.split(" | ")[0] for caption in self.fake.captions[-1]]
+        self.assertEqual(codes[-3:], ["000008", "000010", "000009"])
+        self.at.selectbox[0].select("종목코드 오름차순").run()
+        codes = [caption.split(" | ")[0] for caption in self.fake.captions[-1]]
+        self.assertEqual(codes, [f"{i:06d}" for i in range(1, 11)])
+
+    def test_no_filter_option_shows_minimum(self):
+        self.assertEqual(self.at.selectbox[1].value, "필터 없음 (기본 0.5% 이상)")
 
 
 class ChartsOnlyScanTests(unittest.TestCase):
