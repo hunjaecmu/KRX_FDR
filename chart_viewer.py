@@ -37,7 +37,7 @@ LOOKBACK_RATIO = 2 / 3
 
 BASE_MA_WIDTH = 1.2
 HIGHLIGHT_MULTIPLIER = 1.5
-HIGHLIGHT_MULTIPLIER_MA10 = 2.0
+MA10_WIDTH_MULTIPLIER = 2.0
 
 MA_LINE_COLORS = {
     "ma5": "#f59e0b",
@@ -201,11 +201,10 @@ def _build_addplots(
             continue
 
         width = BASE_MA_WIDTH
-        if ma_col in highlight_set:
-            if ma_col == "ma10":
-                width = BASE_MA_WIDTH * HIGHLIGHT_MULTIPLIER_MA10
-            else:
-                width = BASE_MA_WIDTH * HIGHLIGHT_MULTIPLIER
+        if ma_col == "ma10":
+            width = BASE_MA_WIDTH * MA10_WIDTH_MULTIPLIER
+        elif ma_col in highlight_set:
+            width = BASE_MA_WIDTH * HIGHLIGHT_MULTIPLIER
 
         line_color = MA_LINE_COLORS.get(ma_col)
 

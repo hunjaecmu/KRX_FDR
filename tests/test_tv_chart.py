@@ -2,11 +2,14 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import chart_viewer
+import historical_chart_viewer
 from webapp import tv_chart
 
 
@@ -70,6 +73,19 @@ class RenderHtmlTests(unittest.TestCase):
         rendered = tv_chart.render_html(payload, theme=tv_chart.DARK_THEME)
         self.assertIn("background: #0d1117", rendered)
         self.assertIn(tv_chart.DARK_THEME["up"], rendered)
+
+    def test_ma10_line_is_twice_as_thick(self):
+        payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2)
+        self.assertIn('lineWidth: name === "MA10" ? 2 : 1', tv_chart.render_html(payload))
+
+    def test_image_charts_draw_ma10_twice_as_thick(self):
+        frame = pd.DataFrame({"ma5": [1.0, 2.0], "ma10": [1.0, 2.0], "ma240": [1.0, 2.0]})
+        for module, kwargs in ((historical_chart_viewer, {}), (chart_viewer, {"highlight_ma_cols": ["ma240"]})):
+            with mock.patch.object(module.mpf, "make_addplot", side_effect=lambda series, **kw: kw) as plot:
+                plots = {p["label"]: p["width"] for p in module._build_addplots(frame, **kwargs)}
+            self.assertEqual(plot.call_count, 3)
+            self.assertEqual(plots["MA10"], module.BASE_MA_WIDTH * 2)
+            self.assertEqual(plots["MA5"], module.BASE_MA_WIDTH)
 
     def test_attribution_logo_stays_on(self):
         payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2)
