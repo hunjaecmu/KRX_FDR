@@ -135,7 +135,7 @@ const candles = chart.addSeries(L.CandlestickSeries, {{
 candles.setData(P.candles);
 const maSeries = {{}};
 for (const [name, ma] of Object.entries(P.moving_averages)) {{
-  const line = chart.addSeries(L.LineSeries, {{ color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }});
+  const line = chart.addSeries(L.LineSeries, {{ color: ma.color, lineWidth: name === "MA10" ? 2 : 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }});
   line.setData(ma.data);
   maSeries[name] = {{ line, color: ma.color, last: ma.data[ma.data.length - 1] }};
 }}

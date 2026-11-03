@@ -45,6 +45,7 @@ from data_loader import load_master, load_weekly, load_monthly
 LOOKBACK_BARS = 52
 DEFAULT_MA_COLS = ["ma5", "ma10", "ma20", "ma120", "ma180", "ma240"]
 BASE_MA_WIDTH = 1.2
+MA10_WIDTH_MULTIPLIER = 2.0
 
 MA_LINE_COLORS = {
     "ma5": "#f59e0b",
@@ -264,7 +265,7 @@ def _build_addplots(plot_df: pd.DataFrame, timeframe: Optional[str] = None) -> l
                 series,
                 panel=0,
                 label=ma_col.upper(),
-                width=BASE_MA_WIDTH,
+                width=BASE_MA_WIDTH * MA10_WIDTH_MULTIPLIER if ma_col == "ma10" else BASE_MA_WIDTH,
                 color=MA_LINE_COLORS.get(ma_col),
             )
         )
