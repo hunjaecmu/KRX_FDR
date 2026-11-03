@@ -137,6 +137,19 @@ class HoldingsTests(StorageTestCase):
         self.assertEqual(self.read_bytes(), original)
 
 
+class PatternLabelTests(unittest.TestCase):
+    def test_four_patterns(self):
+        self.assertEqual(storage.pattern_labels(), ["이평 돌파매매", "되돌림패턴", "넓은 이중바닥", "N차 상승"])
+
+    def test_old_labels_read_as_current_patterns(self):
+        self.assertEqual(storage.row_patterns("주봉 240이평 돌파 매매"), ["이평 돌파매매"])
+        self.assertEqual(storage.row_patterns("월봉 넓은 이중바닥"), ["넓은 이중바닥"])
+
+    def test_multiple_patterns_and_blank(self):
+        self.assertEqual(storage.row_patterns("되돌림패턴, N차 상승"), ["되돌림패턴", "N차 상승"])
+        self.assertEqual(storage.row_patterns(""), [])
+
+
 class MergeLegacyRecordTests(StorageTestCase):
     def setUp(self):
         super().setUp()

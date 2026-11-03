@@ -21,7 +21,7 @@ TRACKING_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "position_tracking")
 
 MA_BREAK_CSV = os.path.join(TRACKING_INPUT_DIR, "ma_break.csv")
 
-# 패턴 구분과, 통합 전에 구분별로 쓰던 파일 이름
+# 통합 전의 패턴 구분과 구분별로 쓰던 파일 이름
 RECORD_FILE_OPTIONS = [
     ("주봉 10이평 돌파 매매", "MA10_J_Break.csv"),
     ("주봉 240이평 돌파 매매", "MA240_J_Break.csv"),
@@ -30,6 +30,9 @@ RECORD_FILE_OPTIONS = [
     ("월봉 180이평 돌파 매매", "MA180_W_Break.csv"),
     ("월봉 240이평 돌파 매매", "MA240_W_Break.csv"),
 ]
+
+# 메뉴 6, 7번의 패턴 구분
+PATTERN_LABELS = ["이평 돌파매매", "되돌림패턴", "넓은 이중바닥", "N차 상승"]
 
 # 시장 지수: 종목 마스터와 분리해 스캔 대상에서 제외한다.
 INDEX_TICKERS = [("KS11", "KOSPI"), ("KQ11", "KOSDAQ")]

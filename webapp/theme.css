@@ -297,3 +297,46 @@ a.flow-step:hover {
   color: var(--muted);
   margin-bottom: 0.25rem;
 }
+
+/* Menu 6: keep the save form rows level with the search form rows. */
+@media (min-width: 641px) {
+  .st-key-pattern_checkboxes,
+  [data-testid="stLayoutWrapper"]:has(> .st-key-pattern_checkboxes) {
+    max-height: 4.95rem;
+  }
+
+  .st-key-pattern_checkboxes {
+    gap: 0;
+  }
+
+  .st-key-pattern_checkboxes > * {
+    flex-shrink: 0;
+  }
+
+  .st-key-pattern_checkboxes > div:first-child {
+    height: 1.5rem;
+  }
+
+  .st-key-pattern_checkboxes [data-testid="stCaptionContainer"] p {
+    margin: 0;
+  }
+
+  .st-key-pattern_checkboxes [data-testid="stHorizontalBlock"] {
+    margin-top: 0.25rem;
+  }
+
+  .st-key-pattern_checkboxes [data-testid="stVerticalBlock"] {
+    gap: 0.27rem;
+  }
+}
+
+/* Menu 7: stock info stays on one line; a long memo wraps below it. */
+.st-key-pattern_records [role="radiogroup"] label > div:last-child {
+  min-width: 0;
+}
+
+.st-key-pattern_records [role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
