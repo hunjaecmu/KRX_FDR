@@ -2478,12 +2478,13 @@ def _render_case_gallery(
     if sort_by == "code":
         items = sorted(items, key=lambda x: (str(x.get("code", "")), str(x.get("name", ""))))
     else:
-        # 강도가 큰 종목부터, 강도가 없는 종목은 맨 뒤
+        # 돌파율 순으로, 돌파율이 없는 종목은 맨 뒤
+        sign = -1.0 if sort_by == "pct_desc" else 1.0
         items = sorted(
             items,
             key=lambda x: (
-                x.get("breakout_strength") is None or pd.isna(x.get("breakout_strength")),
-                0.0 if x.get("breakout_strength") is None or pd.isna(x.get("breakout_strength")) else -float(x.get("breakout_strength")),
+                x.get("breakout_pct") is None or pd.isna(x.get("breakout_pct")),
+                0.0 if x.get("breakout_pct") is None or pd.isna(x.get("breakout_pct")) else sign * float(x.get("breakout_pct")),
                 str(x.get("code", "")),
             ),
         )
@@ -2735,6 +2736,12 @@ else:
 
 # 서칭 데이터 조회에서 이 돌파율(%) 미만은 보여주지 않는다.
 MIN_REVIEW_BREAKOUT_PCT = 0.5
+BREAKOUT_NO_FILTER = f"필터 없음 (기본 {MIN_REVIEW_BREAKOUT_PCT}% 이상)"
+REVIEW_SORT_OPTIONS = {
+    "돌파율 내림차순": "pct_desc",
+    "돌파율 오름차순": "pct_asc",
+    "종목코드 오름차순": "code",
+}
 
 REVIEW_CASE_ORDER = [
     "weekly_ma10_breakout",
@@ -3311,12 +3318,12 @@ if not st.session_state.show_intro:
         else:
             ctl1, ctl2, ctl3 = st.columns([2, 3, 3])
             with ctl1:
-                sort_label = st.selectbox("정렬", ["강도순", "코드순"], index=0)
-                sort_by = "strength" if sort_label == "강도순" else "code"
+                sort_label = st.selectbox("정렬", list(REVIEW_SORT_OPTIONS), index=0)
+                sort_by = REVIEW_SORT_OPTIONS[sort_label]
             with ctl2:
                 breakout_filter_opt = st.selectbox(
                     "돌파율 필터",
-                    options=["필터 없음", "최대 1.0%", "최대 2.0%", "최대 3.0%", "최대 5.0%", "최대 10.0%"],
+                    options=[BREAKOUT_NO_FILTER, "최대 1.0%", "최대 2.0%", "최대 3.0%", "최대 5.0%", "최대 10.0%"],
                     index=0,
                 )
             with ctl3:
@@ -3327,7 +3334,7 @@ if not st.session_state.show_intro:
                 )
 
             max_breakout_pct = None
-            if breakout_filter_opt != "필터 없음":
+            if breakout_filter_opt != BREAKOUT_NO_FILTER:
                 max_breakout_pct = float(breakout_filter_opt.replace("최대", "").replace("%", "").strip())
 
             max_volume_pct = None
