@@ -67,7 +67,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 - OUTPUT_DIR
 - TRACKING_INPUT_DIR
 - HOLDINGS_CSV
-- RECORD_FILE_OPTIONS
+- MA_BREAK_CSV
 
 ## 4. 입력/출력 파일
 
@@ -78,7 +78,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 - 관심 종목: TRACKING_INPUT_DIR 하위 `watch_YYYYMM.csv` (월별 파일)
 	- 예: `watch_202604.csv`
 	- `watch.csv` legacy 파일도 선택 조회 지원
-- 패턴 기록: TRACKING_INPUT_DIR 하위 RECORD_FILE_OPTIONS의 파일명
+- 패턴 기록: `tracking/ma_break.csv` (`패턴` 컬럼으로 구분)
 
 ### 4.2 실행 산출물
 
@@ -94,7 +94,7 @@ Streamlit 기반 통합 대시보드 모듈 문서입니다.
 관심/기록 저장 메뉴:
 
 - tracking/watch_YYYYMM.csv
-- tracking/MA10_J_Break.csv 등 패턴 기록 파일
+- tracking/ma_break.csv 패턴 기록 파일
 
 ## 5. 핵심 동작
 

@@ -9,12 +9,14 @@ from typing import Optional
 
 import pandas as pd
 
-from config import RECORD_FILE_OPTIONS, TRACKING_INPUT_DIR
+from config import MA_BREAK_CSV, RECORD_FILE_OPTIONS, TRACKING_INPUT_DIR
 
 READ_ENCODINGS = ("utf-8-sig", "cp949")
 WRITE_ENCODING = "utf-8-sig"
 BACKUP_DIRNAME = "_backup"
 BACKUP_KEEP_COUNT = 30
+LEGACY_RECORD_DIRNAME = "legacy_records"
+PATTERN_COLUMN = "패턴"
 
 HOLDINGS_CODE_CANDIDATES = ["code", "종목코드", "티커", "ticker"]
 HOLDINGS_NAME_CANDIDATES = ["name", "종목명"]
@@ -86,13 +88,38 @@ def append_row(file_path: str, row: dict) -> None:
     write_csv(file_path, out_df)
 
 
-def record_display_options() -> list[str]:
-    return [f"{label}: {fname.replace('.csv', '')}" for label, fname in RECORD_FILE_OPTIONS]
+def pattern_labels() -> list[str]:
+    return [label for label, _ in RECORD_FILE_OPTIONS]
 
 
-def record_label_to_filename(display_label: str) -> str:
-    left_label = str(display_label).split(":", 1)[0].strip()
-    return dict(RECORD_FILE_OPTIONS).get(left_label, "MA10_W_Break.csv")
+def merge_legacy_record_files(target_path: str = MA_BREAK_CSV) -> int:
+    """구분별 기록 파일을 통합 파일 하나로 합치고, 원본은 백업 폴더로 옮긴다. 합친 행 수를 돌려준다."""
+    if os.path.isfile(target_path):
+        return 0
+
+    folder = os.path.dirname(target_path)
+    legacy = [
+        (label, os.path.join(folder, filename))
+        for label, filename in RECORD_FILE_OPTIONS
+        if os.path.isfile(os.path.join(folder, filename))
+    ]
+    if not legacy:
+        return 0
+
+    # 하나라도 읽지 못하면 아무것도 바꾸지 않는다.
+    frames = []
+    for label, path in legacy:
+        frame = read_csv(path, dtype=str)
+        frame.insert(0, PATTERN_COLUMN, label)
+        frames.append(frame)
+    merged = pd.concat(frames, ignore_index=True)
+    write_csv(target_path, merged)
+
+    legacy_dir = os.path.join(folder, BACKUP_DIRNAME, LEGACY_RECORD_DIRNAME)
+    os.makedirs(legacy_dir, exist_ok=True)
+    for _, path in legacy:
+        shutil.move(path, os.path.join(legacy_dir, os.path.basename(path)))
+    return len(merged)
 
 
 def interest_watch_month_token(ref_date: Optional[date] = None) -> str:

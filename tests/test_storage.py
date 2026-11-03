@@ -137,6 +137,49 @@ class HoldingsTests(StorageTestCase):
         self.assertEqual(self.read_bytes(), original)
 
 
+class MergeLegacyRecordTests(StorageTestCase):
+    def setUp(self):
+        super().setUp()
+        self.target = os.path.join(self.dir, "ma_break.csv")
+        self.first = os.path.join(self.dir, "MA10_J_Break.csv")
+        self.second = os.path.join(self.dir, "MA240_J_Break.csv")
+        self.legacy_dir = os.path.join(self.dir, storage.BACKUP_DIRNAME, storage.LEGACY_RECORD_DIRNAME)
+
+    def write_legacy(self):
+        pd.DataFrame({"종목코드": ["005930", "000660"], "메모": ["가", ""]}).to_csv(self.first, index=False, encoding="utf-8-sig")
+        pd.DataFrame({"종목코드": ["068270"], "메모": ["나"]}).to_csv(self.second, index=False, encoding="utf-8-sig")
+
+    def test_merges_rows_with_pattern_and_moves_originals(self):
+        self.write_legacy()
+        self.assertEqual(storage.merge_legacy_record_files(self.target), 3)
+        merged = storage.read_csv(self.target, dtype=str)
+        self.assertEqual(merged["패턴"].tolist(), ["주봉 10이평 돌파 매매", "주봉 10이평 돌파 매매", "주봉 240이평 돌파 매매"])
+        self.assertEqual(merged["종목코드"].tolist(), ["005930", "000660", "068270"])
+        self.assertFalse(os.path.exists(self.first))
+        self.assertEqual(sorted(os.listdir(self.legacy_dir)), ["MA10_J_Break.csv", "MA240_J_Break.csv"])
+
+    def test_existing_target_is_left_alone(self):
+        self.write_legacy()
+        pd.DataFrame({"패턴": ["x"]}).to_csv(self.target, index=False, encoding="utf-8-sig")
+        self.assertEqual(storage.merge_legacy_record_files(self.target), 0)
+        self.assertEqual(len(storage.read_csv(self.target, dtype=str)), 1)
+        self.assertTrue(os.path.exists(self.first))
+
+    def test_no_legacy_files_creates_nothing(self):
+        self.assertEqual(storage.merge_legacy_record_files(self.target), 0)
+        self.assertFalse(os.path.exists(self.target))
+
+    def test_unreadable_file_changes_nothing(self):
+        self.write_legacy()
+        with open(self.second, "wb") as f:
+            f.write('종목코드,메모\n068270,"닫히지 않음\n'.encode("utf-8"))
+        with self.assertRaises(storage.CsvReadError):
+            storage.merge_legacy_record_files(self.target)
+        self.assertFalse(os.path.exists(self.target))
+        self.assertTrue(os.path.exists(self.first))
+        self.assertTrue(os.path.exists(self.second))
+
+
 class WatchFileOptionTests(StorageTestCase):
     def test_backup_folder_and_temp_files_are_not_listed(self):
         path = os.path.join(self.dir, "watch_202001.csv")

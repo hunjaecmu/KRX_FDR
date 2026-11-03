@@ -51,8 +51,9 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - 웹 앱 관심종목 월별 저장/조회 파일
   - 예: `watch_202604.csv`
   - (선택 조회용) 과거 파일 및 `watch.csv` legacy 파일도 웹에서 조회 가능
-- `tracking/MA10_J_Break.csv` 등
-  - 웹 앱 패턴 기록 저장 파일 (`config.RECORD_FILE_OPTIONS`)
+- `tracking/ma_break.csv`
+  - 웹 앱 패턴 기록 통합 파일. `패턴` 컬럼으로 구분 (`config.RECORD_FILE_OPTIONS`)
+  - 이전의 구분별 파일은 처음 사용할 때 자동으로 합쳐지고 `tracking/_backup/legacy_records/`로 옮겨짐
 - `tracking/_backup/`
   - 웹 앱이 저장 직전에 남기는 백업 (파일별 최근 30개)
 
