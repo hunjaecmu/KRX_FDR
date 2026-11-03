@@ -9,7 +9,7 @@ from typing import Optional
 
 import pandas as pd
 
-from config import MA_BREAK_CSV, RECORD_FILE_OPTIONS, TRACKING_INPUT_DIR
+from config import MA_BREAK_CSV, PATTERN_LABELS, RECORD_FILE_OPTIONS, TRACKING_INPUT_DIR
 
 READ_ENCODINGS = ("utf-8-sig", "cp949")
 WRITE_ENCODING = "utf-8-sig"
@@ -17,6 +17,9 @@ BACKUP_DIRNAME = "_backup"
 BACKUP_KEEP_COUNT = 30
 LEGACY_RECORD_DIRNAME = "legacy_records"
 PATTERN_COLUMN = "패턴"
+PATTERN_SEPARATOR = ", "
+# 예전 구분 이름(예: 주봉 10이평 돌파 매매)을 현재 구분으로 읽기 위한 핵심어
+PATTERN_KEYWORDS = (("돌파", "이평 돌파매매"), ("되돌림", "되돌림패턴"), ("이중", "넓은 이중바닥"), ("N차", "N차 상승"))
 
 HOLDINGS_CODE_CANDIDATES = ["code", "종목코드", "티커", "ticker"]
 HOLDINGS_NAME_CANDIDATES = ["name", "종목명"]
@@ -89,7 +92,20 @@ def append_row(file_path: str, row: dict) -> None:
 
 
 def pattern_labels() -> list[str]:
-    return [label for label, _ in RECORD_FILE_OPTIONS]
+    return list(PATTERN_LABELS)
+
+
+def row_patterns(value: str) -> list[str]:
+    """저장된 패턴 값을 현재 구분 목록으로 바꾼다. 파일 내용은 바꾸지 않는다."""
+    patterns: list[str] = []
+    for token in str(value).split(PATTERN_SEPARATOR):
+        token = token.strip()
+        if not token:
+            continue
+        label = next((name for keyword, name in PATTERN_KEYWORDS if keyword in token), token)
+        if label not in patterns:
+            patterns.append(label)
+    return patterns
 
 
 def merge_legacy_record_files(target_path: str = MA_BREAK_CSV) -> int:

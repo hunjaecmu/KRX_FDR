@@ -446,30 +446,52 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
     prefix = "interest" if save_mode == "interest" else "record"
     state_key = f"historical_view_state_{prefix}"
 
-    c1, c2 = st.columns([1.2, 1.8])
-    with c1:
-        stock_mode = st.radio(
-            "종목 선택 방식",
-            options=["코드 직접입력", "종목명 2글자 검색"],
-            horizontal=False,
-            key=f"{prefix}_stock_mode",
-        )
+    # 패턴 기록은 왼쪽에 검색, 오른쪽에 저장을 두고 그 아래에 차트를 그린다.
+    split_save = save_mode == "record" and not LITE_EDITION
+    search_area, save_area = st.columns(2, gap="large") if split_save else (st.container(), None)
 
-        stock_code_input = st.text_input(
-            "종목코드 입력 (예: 005930)",
-            value="",
-            max_chars=6,
-            disabled=(stock_mode != "코드 직접입력"),
-            key=f"{prefix}_stock_code",
-        )
+    with search_area:
+        if split_save:
+            st.markdown("#### 종목 검색")
 
-        prefix_input = st.text_input(
-            "종목명 앞 2글자 입력",
-            value="",
-            max_chars=20,
-            disabled=(stock_mode != "종목명 2글자 검색"),
-            key=f"{prefix}_name_prefix",
-        )
+        if split_save:
+            mode_slot, input_slot, pick_slot = st.columns(3)
+            year_slot, month_day_slot, timeframe_slot = st.columns(3)
+            run_slot = st.container()
+        else:
+            c1, c2 = st.columns([1.2, 1.8])
+            mode_slot = input_slot = pick_slot = c1
+            year_slot = month_day_slot = timeframe_slot = run_slot = c2
+
+        with mode_slot:
+            stock_mode = st.radio(
+                "종목 선택 방식",
+                options=["종목명 2글자 검색", "코드 직접입력"] if split_save else ["코드 직접입력", "종목명 2글자 검색"],
+                horizontal=False,
+                key=f"{prefix}_stock_mode",
+            )
+
+        # 왼쪽 검색 영역은 선택한 방식의 입력칸만 보여준다.
+        stock_code_input = ""
+        prefix_input = ""
+        with input_slot:
+            if not split_save or stock_mode == "코드 직접입력":
+                stock_code_input = st.text_input(
+                    "종목코드 입력 (예: 005930)",
+                    value="",
+                    max_chars=6,
+                    disabled=(stock_mode != "코드 직접입력"),
+                    key=f"{prefix}_stock_code",
+                )
+
+            if not split_save or stock_mode == "종목명 2글자 검색":
+                prefix_input = st.text_input(
+                    "종목명 앞 2글자 입력",
+                    value="",
+                    max_chars=20,
+                    disabled=(stock_mode != "종목명 2글자 검색"),
+                    key=f"{prefix}_name_prefix",
+                )
 
         candidate_labels: list[str] = []
         if stock_mode == "종목명 2글자 검색" and len(prefix_input.strip()) >= 2:
@@ -481,43 +503,47 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                     for _, r in filtered.iterrows()
                 ]
 
-        stock_pick = st.selectbox(
-            "추천 종목 리스트",
-            options=candidate_labels if candidate_labels else [""],
-            index=0,
-            disabled=(stock_mode != "종목명 2글자 검색"),
-            key=f"{prefix}_stock_pick",
-        )
+        with pick_slot:
+            stock_pick = st.selectbox(
+                "추천 종목 리스트",
+                options=candidate_labels if candidate_labels else [""],
+                index=0,
+                disabled=(stock_mode != "종목명 2글자 검색"),
+                key=f"{prefix}_stock_pick",
+            )
 
-    with c2:
         current_year = date.today().year
-        year_input = st.number_input(
-            "연도 입력 (예: 2026)",
-            min_value=1900,
-            max_value=2100,
-            value=current_year,
-            step=1,
-            key=f"{prefix}_year",
-        )
-        month_day_input = st.text_input(
-            "월일 입력 (예: 0315 또는 3-15)",
-            value=date.today().strftime("%m%d"),
-            key=f"{prefix}_month_day",
-        )
-        timeframe_label = st.radio(
-            "봉 타입 선택",
-            options=["1: 주봉", "2: 월봉"],
-            horizontal=True,
-            key=f"{prefix}_timeframe",
-        )
+        with year_slot:
+            year_input = st.number_input(
+                "연도 입력 (예: 2026)",
+                min_value=1900,
+                max_value=2100,
+                value=current_year,
+                step=1,
+                key=f"{prefix}_year",
+            )
+        with month_day_slot:
+            month_day_input = st.text_input(
+                "월일 입력 (예: 0315 또는 3-15)",
+                value=date.today().strftime("%m%d"),
+                key=f"{prefix}_month_day",
+            )
+        with timeframe_slot:
+            timeframe_label = st.radio(
+                "봉 타입 선택",
+                options=["1: 주봉", "2: 월봉"],
+                horizontal=True,
+                key=f"{prefix}_timeframe",
+            )
 
-        run_col1, run_col2, run_col3 = st.columns(3)
-        with run_col1:
-            run_lookup = st.button("종목 차트 조회", type="primary", width="stretch", key=f"{prefix}_run_lookup")
-        with run_col2:
-            move_prev = st.button("이전 1봉", width="stretch", key=f"{prefix}_move_prev")
-        with run_col3:
-            move_next = st.button("다음 1봉", width="stretch", key=f"{prefix}_move_next")
+        with run_slot:
+            run_col1, run_col2, run_col3 = st.columns(3)
+            with run_col1:
+                run_lookup = st.button("종목 차트 조회", type="primary", width="stretch", key=f"{prefix}_run_lookup")
+            with run_col2:
+                move_prev = st.button("이전 1봉", width="stretch", key=f"{prefix}_move_prev")
+            with run_col3:
+                move_next = st.button("다음 1봉", width="stretch", key=f"{prefix}_move_next")
 
     trigger_error = None
     if run_lookup:
@@ -533,6 +559,9 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             month, day = _parse_month_day_text(month_day_input)
             target_date = pd.Timestamp(year=int(year_input), month=month, day=day)
             timeframe = "weekly" if timeframe_label.startswith("1") else "monthly"
+            if save_mode == "record":
+                # 패턴 기록은 입력 날짜가 속한 주(달)의 봉을 기준봉으로 삼는다.
+                target_date = tv_chart.period_end(target_date, timeframe)
 
             st.session_state[state_key] = {
                 "code": code,
@@ -566,6 +595,10 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
 
     state = st.session_state.get(state_key)
     if not state:
+        if split_save:
+            with save_area:
+                st.markdown(f"#### {panel_title}")
+                st.info("종목 차트를 조회하면 저장할 수 있습니다.")
         return
 
     try:
@@ -575,70 +608,81 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
         state["target_date"] = anchor_date.strftime("%Y-%m-%d")
         st.session_state[state_key] = state
 
+        def render_save_form() -> None:
+            if not split_save:
+                st.markdown("---")
+            st.markdown(f"#### {panel_title}")
+
+            save_col1, save_col2 = st.columns([1.1, 1.9])
+            with save_col1:
+                classification = st.selectbox(
+                    "분류",
+                    options=["10이평", "120이평", "180이평", "240이평"] + (["해당 없음"] if save_mode == "record" else []),
+                    index=0,
+                    key=f"{prefix}_classification",
+                )
+            selected_patterns: list[str] = []
+            if save_mode == "record":
+                with save_col2:
+                    with st.container(key="pattern_checkboxes"):
+                        st.caption("패턴 구분 (여러 개 선택 가능)")
+                        pattern_cols = st.columns(2)
+                        for i, label in enumerate(storage.pattern_labels()):
+                            with pattern_cols[i % 2]:
+                                if st.checkbox(label, key=f"{prefix}_pattern_{i}"):
+                                    selected_patterns.append(label)
+                memo_text = st.text_input("메모", value="", key=f"{prefix}_memo")
+            else:
+                with save_col2:
+                    memo_text = st.text_input("메모", value="", key=f"{prefix}_memo")
+                    current_watch_path = storage.interest_watch_monthly_path()
+                    st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
+
+            if st.button("현재 차트 데이터 저장", width="stretch", key=f"{prefix}_save"):
+                try:
+                    if save_mode == "record" and not selected_patterns:
+                        raise ValueError("패턴 구분을 하나 이상 선택하세요.")
+
+                    snap_date, snap_close = _extract_last_bar_snapshot(
+                        code=str(state["code"]),
+                        timeframe=str(state["timeframe"]),
+                        target_date=pd.to_datetime(state["target_date"]),
+                    )
+
+                    row = {
+                        "종목명": str(state["name"]),
+                        "종목코드": str(state["code"]),
+                        "종목의 마지막 봉의 날짜": snap_date.strftime("%Y-%m-%d"),
+                        "주봉 or 월봉 선택": "주봉" if str(state["timeframe"]) == "weekly" else "월봉",
+                        "현시점 종가": f"{snap_close:.2f}",
+                        "분류": classification,
+                        "메모": memo_text,
+                    }
+
+                    if save_mode == "interest":
+                        target_file = storage.interest_watch_monthly_path()
+                    else:
+                        storage.merge_legacy_record_files()
+                        target_file = MA_BREAK_CSV
+                        row = {storage.PATTERN_COLUMN: storage.PATTERN_SEPARATOR.join(selected_patterns), **row}
+
+                    storage.append_row(target_file, row)
+                    st.success(f"저장 완료: {target_file}")
+                except Exception as save_e:
+                    st.error(f"저장 실패: {save_e}")
+
+        if split_save:
+            with save_area:
+                render_save_form()
+
         st.success(
             f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
             f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
         )
         show_chart()
 
-        if LITE_EDITION:
-            return
-
-        st.markdown("---")
-        st.markdown(f"#### {panel_title}")
-
-        save_col1, save_col2 = st.columns([1.1, 1.9])
-        with save_col1:
-            classification = st.selectbox(
-                "분류",
-                options=["10이평", "120이평", "180이평", "240이평"],
-                index=0,
-                key=f"{prefix}_classification",
-            )
-        with save_col2:
-            memo_text = st.text_input("메모", value="", key=f"{prefix}_memo")
-            record_file_label = None
-            if save_mode == "record":
-                record_file_label = st.selectbox(
-                    "패턴 구분",
-                    options=storage.pattern_labels(),
-                    index=0,
-                    key=f"{prefix}_record_file",
-                    help="ma_break.csv 파일 하나에 구분과 함께 저장됩니다.",
-                )
-            else:
-                current_watch_path = storage.interest_watch_monthly_path()
-                st.caption(f"관심 저장 파일: {os.path.basename(current_watch_path)}")
-
-        if st.button("현재 차트 데이터 저장", width="stretch", key=f"{prefix}_save"):
-            try:
-                snap_date, snap_close = _extract_last_bar_snapshot(
-                    code=str(state["code"]),
-                    timeframe=str(state["timeframe"]),
-                    target_date=pd.to_datetime(state["target_date"]),
-                )
-
-                row = {
-                    "종목명": str(state["name"]),
-                    "종목코드": str(state["code"]),
-                    "종목의 마지막 봉의 날짜": snap_date.strftime("%Y-%m-%d"),
-                    "주봉 or 월봉 선택": "주봉" if str(state["timeframe"]) == "weekly" else "월봉",
-                    "현시점 종가": f"{snap_close:.2f}",
-                    "분류": classification,
-                    "메모": memo_text,
-                }
-
-                if save_mode == "interest":
-                    target_file = storage.interest_watch_monthly_path()
-                else:
-                    storage.merge_legacy_record_files()
-                    target_file = MA_BREAK_CSV
-                    row = {storage.PATTERN_COLUMN: str(record_file_label), **row}
-
-                storage.append_row(target_file, row)
-                st.success(f"저장 완료: {target_file}")
-            except Exception as save_e:
-                st.error(f"저장 실패: {save_e}")
+        if not split_save and not LITE_EDITION:
+            render_save_form()
     except Exception as e:
         st.error(str(e))
 
@@ -1024,29 +1068,38 @@ def _render_saved_pattern_data() -> None:
             if storage.PATTERN_COLUMN not in rdf.columns:
                 rdf[storage.PATTERN_COLUMN] = ""
 
-            pattern_counts = rdf[storage.PATTERN_COLUMN].value_counts()
-            st.markdown("#### 패턴별 요약")
-            st.dataframe(
-                pd.DataFrame(
-                    [{"구분": label, "행수": int(pattern_counts.get(label, 0))} for label in storage.pattern_labels()]
-                ),
-                width="stretch",
-                hide_index=True,
-            )
-
-            st.markdown("#### 기록 데이터")
-            pattern_filter = st.selectbox(
-                "패턴 구분",
-                options=["전체"] + storage.pattern_labels(),
-                index=0,
-                key="pattern_view_record_file",
-                on_change=lambda: st.session_state.update(pattern_page_idx=0),
-            )
-            if pattern_filter != "전체":
-                rdf = rdf[rdf[storage.PATTERN_COLUMN] == pattern_filter].reset_index(drop=True)
-            if rdf.empty:
-                st.info("선택한 패턴의 기록이 없습니다.")
+            row_pattern_lists = rdf[storage.PATTERN_COLUMN].map(storage.row_patterns)
+            rdf[storage.PATTERN_COLUMN] = row_pattern_lists.map(storage.PATTERN_SEPARATOR.join)
+            pattern_counts = {
+                label: int(row_pattern_lists.map(lambda p, label=label: label in p).sum())
+                for label in storage.pattern_labels()
+            }
+            available_patterns = [label for label, count in pattern_counts.items() if count > 0]
+            if not available_patterns:
+                st.info("패턴 기록이 없습니다.")
                 return
+
+            pattern_key = "pattern_view_pattern"
+            page_key = "pattern_page_idx"
+            if st.session_state.get(pattern_key) not in available_patterns:
+                st.session_state[pattern_key] = available_patterns[0]
+                st.session_state[page_key] = 0
+
+            # 개수가 0인 패턴은 고를 수 없다.
+            pattern_cols = st.columns(len(pattern_counts))
+            for i, (label, count) in enumerate(pattern_counts.items()):
+                with pattern_cols[i]:
+                    st.button(
+                        f"{label} :small[({count})]",
+                        key=f"pattern_view_button_{i}",
+                        type="primary" if label == st.session_state[pattern_key] else "secondary",
+                        disabled=count == 0,
+                        width="stretch",
+                        on_click=lambda label=label: st.session_state.update({pattern_key: label, page_key: 0}),
+                    )
+
+            pattern_filter = st.session_state[pattern_key]
+            rdf = rdf[row_pattern_lists.map(lambda p: pattern_filter in p)].reset_index(drop=True)
 
             if "종목코드" not in rdf.columns:
                 st.error("기록 데이터에 종목코드 컬럼이 없습니다.")
@@ -1076,178 +1129,137 @@ def _render_saved_pattern_data() -> None:
             page_size = 10
             total_pages = max(1, (total_rows + page_size - 1) // page_size)
 
-            page_key = "pattern_page_idx"
             if page_key not in st.session_state:
                 st.session_state[page_key] = 0
             st.session_state[page_key] = max(0, min(int(st.session_state[page_key]), total_pages - 1))
 
-            nav1, nav2, nav3 = st.columns([1, 1, 4])
-            with nav1:
-                if st.button("이전 10개", width="stretch", key="pattern_prev_page"):
-                    st.session_state[page_key] = max(0, int(st.session_state[page_key]) - 1)
-            with nav2:
-                if st.button("다음 10개", width="stretch", key="pattern_next_page"):
-                    st.session_state[page_key] = min(total_pages - 1, int(st.session_state[page_key]) + 1)
-            with nav3:
+            list_col, chart_col = st.columns([1, 2], gap="large")
+            with list_col:
+                nav1, nav2 = st.columns(2)
+                with nav1:
+                    if st.button("이전 10개", width="stretch", key="pattern_prev_page"):
+                        st.session_state[page_key] = max(0, int(st.session_state[page_key]) - 1)
+                with nav2:
+                    if st.button("다음 10개", width="stretch", key="pattern_next_page"):
+                        st.session_state[page_key] = min(total_pages - 1, int(st.session_state[page_key]) + 1)
                 st.caption(f"페이지 {int(st.session_state[page_key]) + 1}/{total_pages} | 총 {total_rows}건")
 
-            start = int(st.session_state[page_key]) * page_size
-            end = min(start + page_size, total_rows)
-            page_df = rdf.iloc[start:end].copy().reset_index(drop=True)
+                start = int(st.session_state[page_key]) * page_size
+                end = min(start + page_size, total_rows)
 
-            selected_key = "pattern_selected_row"
-            selected_idx_key = "pattern_selected_table_idx"
+                # 기록 하나를 두 줄로 보여준다: 종목 정보 / 메모
+                def record_line(idx: int) -> str:
+                    row = rdf.iloc[idx]
+                    parts = [
+                        f"{str(row.get('종목명', '')).strip()} ({row['종목코드']})",
+                        str(row.get("주봉 or 월봉 선택", "")).strip(),
+                        str(row.get("분류", "")).strip(),
+                        str(row.get("종목의 마지막 봉의 날짜", "")).strip(),
+                    ]
+                    return " · ".join(p for p in parts if p and p != "nan")
 
-            table_df = page_df[[
-                storage.PATTERN_COLUMN,
-                "종목명",
-                "종목코드",
-                "주봉 or 월봉 선택",
-                "종목의 마지막 봉의 날짜",
-                "분류",
-                "메모",
-            ]].copy()
-            table_df.index = table_df.index + start + 1
-            table_df.index.name = "No"
+                record_indices = list(range(start, end))
+                memos = [str(rdf.iloc[i].get("메모", "")).strip() or "메모 없음" for i in record_indices]
+                with st.container(key="pattern_records"):
+                    picked_idx = st.radio(
+                        "기록 데이터",
+                        options=record_indices,
+                        format_func=record_line,
+                        captions=memos,
+                        key=f"pattern_record_{pattern_filter}_{st.session_state[page_key]}",
+                        label_visibility="collapsed",
+                    )
 
-            pattern_table_column_config = {
-                storage.PATTERN_COLUMN: st.column_config.TextColumn(width="small"),
-                "종목명": st.column_config.TextColumn(width="small"),
-                "종목코드": st.column_config.TextColumn(width="small"),
-                "주봉 or 월봉 선택": st.column_config.TextColumn(width="small"),
-                "종목의 마지막 봉의 날짜": st.column_config.TextColumn(width="small"),
-                "분류": st.column_config.TextColumn(width="small"),
-                "메모": st.column_config.TextColumn(width="large"),
+            chosen = rdf.iloc[int(picked_idx)]
+            picked = {
+                "code": str(chosen.get("종목코드", "")).strip().zfill(6),
+                "name": str(chosen.get("종목명", "")).strip(),
+                "date": str(chosen.get("종목의 마지막 봉의 날짜", "")).strip(),
+                "timeframe_text": str(chosen.get("주봉 or 월봉 선택", "")).strip(),
             }
 
-            selected_rows = []
-            try:
-                table_event = st.dataframe(
-                    table_df,
-                    width="stretch",
-                    column_config=pattern_table_column_config,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                    key="pattern_action_table",
-                )
-                if table_event is not None and hasattr(table_event, "selection"):
-                    selected_rows = list(getattr(table_event.selection, "rows", []) or [])
-            except TypeError:
-                st.dataframe(
-                    table_df,
-                    width="stretch",
-                    column_config=pattern_table_column_config,
-                )
+            with chart_col:
+                timeframe_text = str(picked.get("timeframe_text", "")).strip()
+                timeframe = "weekly" if "주" in timeframe_text or timeframe_text.lower().startswith("w") else "monthly"
 
-            c1, c2 = st.columns([1, 5])
-            with c1:
-                chart_clicked = st.button("차트", key="pattern_action_chart", width="stretch")
-
-            if selected_rows:
-                st.session_state[selected_idx_key] = int(start + int(selected_rows[0]))
-
-            selected_global_idx = st.session_state.get(selected_idx_key)
-            if selected_global_idx is not None and 0 <= int(selected_global_idx) < len(rdf):
-                chosen = rdf.iloc[int(selected_global_idx)]
-                chosen_name = str(chosen.get("종목명", "")).strip() or str(chosen.get("종목코드", "")).strip()
-                st.caption(f"선택된 종목: {chosen_name} ({str(chosen.get('종목코드', '')).zfill(6)})")
-
-                if chart_clicked:
-                    st.session_state[selected_key] = {
-                        "code": str(chosen.get("종목코드", "")).strip().zfill(6),
-                        "name": str(chosen.get("종목명", "")).strip(),
-                        "date": str(chosen.get("종목의 마지막 봉의 날짜", "")).strip(),
-                        "timeframe_text": str(chosen.get("주봉 or 월봉 선택", "")).strip(),
-                    }
-            else:
-                if chart_clicked:
-                    st.warning("기록 데이터 테이블에서 먼저 종목 1개를 선택하세요.")
-
-            st.markdown("---")
-            st.markdown("#### 선택 기록 차트")
-
-            picked = st.session_state.get(selected_key)
-            if not picked:
-                st.info("종목을 선택하고 차트 버튼을 누르세요")
-                return
-
-            timeframe_text = str(picked.get("timeframe_text", "")).strip()
-            timeframe = "weekly" if "주" in timeframe_text or timeframe_text.lower().startswith("w") else "monthly"
-
-            target_date_text = str(picked.get("date", "")).strip()
-            try:
-                target_date = pd.to_datetime(target_date_text)
-            except Exception:
-                target_date = pd.Timestamp(date.today())
-
-            chart_state_key = "pattern_chart_state"
-            if chart_state_key not in st.session_state:
-                st.session_state[chart_state_key] = {
-                    "code": str(picked.get("code", "")).zfill(6),
-                    "name": str(picked.get("name", "")),
-                    "timeframe": timeframe,
-                    "target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
-                }
-
-            state = st.session_state[chart_state_key]
-            if (
-                str(state.get("code")) != str(picked.get("code", "")).zfill(6)
-                or str(state.get("timeframe")) != timeframe
-                or str(state.get("origin_target_date")) != pd.to_datetime(target_date).strftime("%Y-%m-%d")
-            ):
-                state = {
-                    "code": str(picked.get("code", "")).zfill(6),
-                    "name": str(picked.get("name", "")),
-                    "timeframe": timeframe,
-                    "target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
-                    "origin_target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
-                }
-                st.session_state[chart_state_key] = state
-
-            mv1, mv2, mv3, _ = st.columns([1, 1, 1, 3])
-            with mv1:
-                move_prev = st.button("이전 1봉", key="pattern_chart_prev", width="stretch")
-            with mv2:
-                move_home = st.button("처음위치로", key="pattern_chart_home", width="stretch")
-            with mv3:
-                move_next = st.button("다음 1봉", key="pattern_chart_next", width="stretch")
-
-            if move_home:
-                state["target_date"] = str(state.get("origin_target_date", state.get("target_date")))
-                st.session_state[chart_state_key] = state
-
-            if move_prev or move_next:
+                target_date_text = str(picked.get("date", "")).strip()
                 try:
-                    step = -1 if move_prev else 1
-                    shifted = _shift_anchor_target_date(
-                        code=str(state["code"]),
-                        timeframe=str(state["timeframe"]),
-                        current_target_date=pd.to_datetime(state["target_date"]),
-                        step=step,
-                    )
-                    state["target_date"] = shifted.strftime("%Y-%m-%d")
+                    target_date = pd.to_datetime(target_date_text)
+                except Exception:
+                    target_date = pd.Timestamp(date.today())
+                # 기록 날짜가 속한 주(달)의 봉을 기준봉으로 삼는다.
+                target_date = tv_chart.period_end(target_date, timeframe)
+
+                chart_state_key = "pattern_chart_state"
+                if chart_state_key not in st.session_state:
+                    st.session_state[chart_state_key] = {
+                        "code": str(picked.get("code", "")).zfill(6),
+                        "name": str(picked.get("name", "")),
+                        "timeframe": timeframe,
+                        "target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
+                    }
+
+                state = st.session_state[chart_state_key]
+                if (
+                    str(state.get("code")) != str(picked.get("code", "")).zfill(6)
+                    or str(state.get("timeframe")) != timeframe
+                    or str(state.get("origin_target_date")) != pd.to_datetime(target_date).strftime("%Y-%m-%d")
+                ):
+                    state = {
+                        "code": str(picked.get("code", "")).zfill(6),
+                        "name": str(picked.get("name", "")),
+                        "timeframe": timeframe,
+                        "target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
+                        "origin_target_date": pd.to_datetime(target_date).strftime("%Y-%m-%d"),
+                    }
                     st.session_state[chart_state_key] = state
-                except Exception as move_e:
-                    st.error(f"차트 이동 실패: {move_e}")
 
-            try:
-                show_chart, anchor_date = _build_stock_chart(
-                    str(state["code"]),
-                    str(state["name"]),
-                    str(state["timeframe"]),
-                    state["target_date"],
-                    origin_date_text=str(state.get("origin_target_date", state["target_date"])),
-                )
-                state["target_date"] = anchor_date.strftime("%Y-%m-%d")
-                st.session_state[chart_state_key] = state
+                mv1, mv2, mv3, _ = st.columns([1, 1, 1, 3])
+                with mv1:
+                    move_prev = st.button("이전 1봉", key="pattern_chart_prev", width="stretch")
+                with mv2:
+                    move_home = st.button("처음위치로", key="pattern_chart_home", width="stretch")
+                with mv3:
+                    move_next = st.button("다음 1봉", key="pattern_chart_next", width="stretch")
 
-                st.success(
-                    f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
-                    f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
-                )
-                show_chart()
-            except Exception as chart_e:
-                st.error(f"차트 생성 실패: {chart_e}")
+                if move_home:
+                    state["target_date"] = str(state.get("origin_target_date", state.get("target_date")))
+                    st.session_state[chart_state_key] = state
+
+                if move_prev or move_next:
+                    try:
+                        step = -1 if move_prev else 1
+                        shifted = _shift_anchor_target_date(
+                            code=str(state["code"]),
+                            timeframe=str(state["timeframe"]),
+                            current_target_date=pd.to_datetime(state["target_date"]),
+                            step=step,
+                        )
+                        state["target_date"] = shifted.strftime("%Y-%m-%d")
+                        st.session_state[chart_state_key] = state
+                    except Exception as move_e:
+                        st.error(f"차트 이동 실패: {move_e}")
+
+                try:
+                    show_chart, anchor_date = _build_stock_chart(
+                        str(state["code"]),
+                        str(state["name"]),
+                        str(state["timeframe"]),
+                        state["target_date"],
+                        origin_date_text=str(state.get("origin_target_date", state["target_date"])),
+                        # 월봉은 240이평 데이터가 없어도 범례에 NaN으로 보여준다.
+                        required_mas=("ma240",) if state["timeframe"] == "monthly" else (),
+                    )
+                    state["target_date"] = anchor_date.strftime("%Y-%m-%d")
+                    st.session_state[chart_state_key] = state
+
+                    st.success(
+                        f"{state['name']} ({state['code']}) | 기준봉 {anchor_date.strftime('%Y-%m-%d')} | "
+                        f"{'주봉' if state['timeframe'] == 'weekly' else '월봉'} {LOOKBACK_BARS}봉"
+                    )
+                    show_chart()
+                except Exception as chart_e:
+                    st.error(f"차트 생성 실패: {chart_e}")
         except Exception as e:
             st.error(f"기록 파일 조회 실패: {e}")
     else:
@@ -1396,6 +1408,7 @@ def _build_stock_chart(
     target_date_text: str,
     origin_date_text: Optional[str] = None,
     buy_price: Optional[float] = None,
+    required_mas: tuple[str, ...] = (),
 ):
     """차트를 준비해 (표시 함수, 기준봉 날짜)를 돌려준다."""
     target_date = pd.to_datetime(target_date_text)
@@ -1436,6 +1449,7 @@ def _build_stock_chart(
         LOOKBACK_BARS,
         price_lines=price_lines,
         marker_date=marker_date,
+        required_mas=required_mas,
     )
     chart_html = tv_chart.render_html(payload, theme=tv_chart.DARK_THEME if LITE_EDITION else tv_chart.LIGHT_THEME)
     return (lambda: components.html(chart_html, height=tv_chart.CHART_HEIGHT)), pd.to_datetime(payload["anchor"])

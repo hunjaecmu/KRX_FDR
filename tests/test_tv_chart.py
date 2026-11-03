@@ -53,12 +53,33 @@ class BuildPayloadTests(unittest.TestCase):
         self.assertEqual([p["time"] for p in moving_averages["MA5"]["data"]], ["2026-10-23", "2026-10-30"])
         self.assertNotIn("MA10", moving_averages)
 
+    def test_required_moving_average_is_kept_without_values(self):
+        payload = self.payload(required_mas=("ma10", "ma240"))
+        self.assertEqual(payload["moving_averages"]["MA10"]["data"], [])
+        self.assertEqual(payload["moving_averages"]["MA240"]["data"], [])
+
     def test_marker_moves_to_last_bar_on_or_before_date(self):
         payload = self.payload(marker_date=pd.Timestamp("2026-10-20"))
         self.assertEqual(payload["markers"][0]["time"], "2026-10-16")
 
     def test_marker_before_all_data_is_omitted(self):
         self.assertEqual(self.payload(marker_date=pd.Timestamp("2020-01-01"))["markers"], [])
+
+
+class PeriodEndTests(unittest.TestCase):
+    def test_week_start_date_maps_to_that_week(self):
+        # 2023-01-30은 월요일, 그 주 주봉은 2023-02-03(금)
+        self.assertEqual(tv_chart.period_end("2023-01-30", "weekly"), pd.Timestamp("2023-02-05"))
+        self.assertEqual(tv_chart.period_end("2023-02-03", "weekly"), pd.Timestamp("2023-02-05"))
+        self.assertEqual(tv_chart.period_end("2023-02-05", "weekly"), pd.Timestamp("2023-02-05"))
+
+    def test_month_date_maps_to_month_end(self):
+        self.assertEqual(tv_chart.period_end("2020-01-01", "monthly"), pd.Timestamp("2020-01-31"))
+        self.assertEqual(tv_chart.period_end("2020-1-31", "monthly"), pd.Timestamp("2020-01-31"))
+
+    def test_week_start_shows_bar_of_that_week(self):
+        payload = tv_chart.build_payload(bars(), tv_chart.period_end("2026-10-26", "weekly"), "t", 2)
+        self.assertEqual(payload["anchor"], "2026-10-30")
 
 
 class RenderHtmlTests(unittest.TestCase):
@@ -86,6 +107,10 @@ class RenderHtmlTests(unittest.TestCase):
             self.assertEqual(plot.call_count, 3)
             self.assertEqual(plots["MA10"], module.BASE_MA_WIDTH * 2)
             self.assertEqual(plots["MA5"], module.BASE_MA_WIDTH)
+
+    def test_missing_moving_average_value_shows_nan(self):
+        payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2, required_mas=("ma240",))
+        self.assertIn('"NaN"', tv_chart.render_html(payload))
 
     def test_attribution_logo_stays_on(self):
         payload = tv_chart.build_payload(bars(), pd.Timestamp("2026-10-30"), "t", 2)

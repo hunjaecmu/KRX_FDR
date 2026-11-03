@@ -41,6 +41,15 @@ DARK_THEME = {
 }
 
 
+def period_end(target_date, timeframe: str) -> pd.Timestamp:
+    """날짜가 속한 주(월~일) 또는 달의 마지막 날을 돌려준다.
+
+    주봉 날짜는 그 주의 마지막 거래일이지만, 기록 날짜는 TradingView처럼 주의 시작일(월요일)인 경우가 많다.
+    """
+    period = "W-SUN" if timeframe == "weekly" else "M"
+    return pd.to_datetime(target_date).to_period(period).end_time.normalize()
+
+
 def build_payload(
     df: pd.DataFrame,
     target_date: pd.Timestamp,
@@ -48,8 +57,12 @@ def build_payload(
     visible_bars: int,
     price_lines: Optional[list[dict]] = None,
     marker_date: Optional[pd.Timestamp] = None,
+    required_mas: tuple[str, ...] = (),
 ) -> dict:
-    """기준일까지의 봉만 넣는다. 복기할 때 이후 시세가 보이지 않도록 하기 위함이다."""
+    """기준일까지의 봉만 넣는다. 복기할 때 이후 시세가 보이지 않도록 하기 위함이다.
+
+    required_mas의 이평선은 값이 없어도 범례에 NaN으로 표시한다.
+    """
     work = df.copy()
     work["date"] = pd.to_datetime(work["date"], errors="coerce")
     work = work.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
@@ -70,10 +83,13 @@ def build_payload(
         ]
     moving_averages = {}
     for column, color in MA_COLORS.items():
-        if column not in work.columns:
+        if column not in work.columns and column not in required_mas:
             continue
-        points = work[[column]].assign(time=times).dropna(subset=[column])
-        if not points.empty:
+        if column not in work.columns:
+            points = pd.DataFrame(columns=[column, "time"])
+        else:
+            points = work[[column]].assign(time=times).dropna(subset=[column])
+        if not points.empty or column in required_mas:
             moving_averages[column.upper()] = {
                 "color": color,
                 "data": [{"time": t, "value": float(v)} for t, v in zip(points["time"], points[column])],
@@ -137,7 +153,7 @@ const maSeries = {{}};
 for (const [name, ma] of Object.entries(P.moving_averages)) {{
   const line = chart.addSeries(L.LineSeries, {{ color: ma.color, lineWidth: name === "MA10" ? 2 : 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }});
   line.setData(ma.data);
-  maSeries[name] = {{ line, color: ma.color, last: ma.data[ma.data.length - 1] }};
+  maSeries[name] = {{ line, color: ma.color, last: ma.data.length ? ma.data[ma.data.length - 1].value : null }};
 }}
 let volumeSeries = null;
 if (P.volumes.length) {{
@@ -153,6 +169,7 @@ if (P.markers.length) {{
   L.createSeriesMarkers(candles, P.markers.map(m => ({{ time: m.time, position: "aboveBar", color: T.guide, shape: "arrowDown", text: m.text }})));
 }}
 const fmt = v => v === undefined || v === null ? "-" : v.toLocaleString("ko-KR", {{ maximumFractionDigits: 2 }});
+const fmtMa = v => v === undefined || v === null ? "NaN" : fmt(v);
 const addSpan = (text, color) => {{
   const span = document.createElement("span");
   span.textContent = text;
@@ -176,12 +193,12 @@ function showLegend(bar, volume, maValue) {{
     legend.appendChild(document.createElement("br"));
   }}
   for (const [name, item] of Object.entries(maSeries)) {{
-    addSpan(name + " " + fmt(maValue(name, item)), item.color);
+    addSpan(name + " " + fmtMa(maValue(name, item)), item.color);
   }}
 }}
 const lastBar = P.candles[P.candles.length - 1];
 const lastVolume = P.volumes.length ? P.volumes[P.volumes.length - 1].value : null;
-const showLast = () => showLegend(lastBar, lastVolume, (name, item) => item.last.value);
+const showLast = () => showLegend(lastBar, lastVolume, (name, item) => item.last);
 showLast();
 chart.subscribeCrosshairMove(param => {{
   const bar = param.time ? param.seriesData.get(candles) : null;
