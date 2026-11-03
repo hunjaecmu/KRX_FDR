@@ -19,6 +19,9 @@ HOLDINGS_CSV = os.path.join(TRACKING_INPUT_DIR, "holdings.csv")
 INTEREST_WATCH_CSV = os.path.join(TRACKING_INPUT_DIR, "watch.csv")
 TRACKING_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "position_tracking")
 
+MA_BREAK_CSV = os.path.join(TRACKING_INPUT_DIR, "ma_break.csv")
+
+# 패턴 구분과, 통합 전에 구분별로 쓰던 파일 이름
 RECORD_FILE_OPTIONS = [
     ("주봉 10이평 돌파 매매", "MA10_J_Break.csv"),
     ("주봉 240이평 돌파 매매", "MA240_J_Break.csv"),

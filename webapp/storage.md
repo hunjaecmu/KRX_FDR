@@ -18,7 +18,14 @@
   - 임시 파일에 쓴 뒤 교체하므로 저장 실패 시 원본 유지
   - 항상 `utf-8-sig`로 저장
 
-## 3. 테스트
+## 3. 패턴 기록 통합
+
+- `merge_legacy_record_files`: 구분별 기록 파일을 `ma_break.csv`로 합칩니다.
+  - `패턴` 컬럼에 구분을 넣고, 원본은 `_backup/legacy_records/`로 옮깁니다.
+  - 통합 파일이 이미 있으면 아무것도 하지 않습니다.
+  - 파일 하나라도 읽지 못하면 아무것도 바꾸지 않습니다.
+
+## 4. 테스트
 
 ```bash
 python -m unittest discover -s tests

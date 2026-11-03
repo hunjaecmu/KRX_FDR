@@ -29,7 +29,7 @@ from config import (
     OUTPUT_DIR,
     TRACKING_INPUT_DIR,
     HOLDINGS_CSV,
-    RECORD_FILE_OPTIONS,
+    MA_BREAK_CSV,
     INDEX_TICKERS,
 )
 from data_loader import load_daily, load_master, load_monthly, load_weekly
@@ -600,11 +600,11 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
             record_file_label = None
             if save_mode == "record":
                 record_file_label = st.selectbox(
-                    "기록 파일명",
-                    options=storage.record_display_options(),
+                    "패턴 구분",
+                    options=storage.pattern_labels(),
                     index=0,
                     key=f"{prefix}_record_file",
-                    help="tracking 폴더 아래 고정 파일명 중 하나로 저장됩니다.",
+                    help="ma_break.csv 파일 하나에 구분과 함께 저장됩니다.",
                 )
             else:
                 current_watch_path = storage.interest_watch_monthly_path()
@@ -628,11 +628,12 @@ def _render_stock_lookup_panel(save_mode: str) -> None:
                     "메모": memo_text,
                 }
 
-                tracking_dir = TRACKING_INPUT_DIR
                 if save_mode == "interest":
                     target_file = storage.interest_watch_monthly_path()
                 else:
-                    target_file = os.path.join(tracking_dir, storage.record_label_to_filename(str(record_file_label)))
+                    storage.merge_legacy_record_files()
+                    target_file = MA_BREAK_CSV
+                    row = {storage.PATTERN_COLUMN: str(record_file_label), **row}
 
                 storage.append_row(target_file, row)
                 st.success(f"저장 완료: {target_file}")
@@ -1001,43 +1002,52 @@ div[data-testid="stTextArea"] textarea {
 
 
 def _render_saved_pattern_data() -> None:
-    st.caption("tracking 폴더의 기록 CSV 데이터를 조회합니다.")
-    tracking_dir = TRACKING_INPUT_DIR
-    os.makedirs(tracking_dir, exist_ok=True)
+    selected_record_path = MA_BREAK_CSV
+    try:
+        merged_rows = storage.merge_legacy_record_files()
+    except (storage.CsvReadError, OSError) as merge_e:
+        st.error(f"기록 파일 통합 실패: {merge_e}")
+        return
+    if merged_rows:
+        st.success(f"기존 기록 {merged_rows:,}행을 ma_break.csv로 통합했습니다.")
 
-    summary_rows = []
-    for label, filename in RECORD_FILE_OPTIONS:
-        path = os.path.join(tracking_dir, filename)
-        count = 0
-        if os.path.isfile(path):
-            try:
-                count = int(len(storage.read_csv(path, dtype=str)))
-            except storage.CsvReadError as read_e:
-                count = None
-                st.warning(str(read_e))
-        summary_rows.append({"구분": label, "파일명": filename, "행수": count})
-
-    st.markdown("#### 기록 파일 요약")
-    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
-
-    st.markdown("#### 기록 데이터")
-    record_file_label = st.selectbox(
-        "기록 파일 선택",
-        options=storage.record_display_options(),
-        index=0,
-        key="pattern_view_record_file",
-    )
-    selected_record_path = os.path.join(tracking_dir, storage.record_label_to_filename(record_file_label))
     if os.path.isfile(selected_record_path):
         try:
             rdf = storage.read_csv(selected_record_path, dtype=str)
             st.caption(f"파일: {selected_record_path}")
 
             if rdf.empty:
-                st.info("선택한 기록 파일 데이터가 비어 있습니다.")
+                st.info("기록 데이터가 비어 있습니다.")
                 return
 
             rdf = rdf.fillna("").reset_index(drop=True)
+            if storage.PATTERN_COLUMN not in rdf.columns:
+                rdf[storage.PATTERN_COLUMN] = ""
+
+            pattern_counts = rdf[storage.PATTERN_COLUMN].value_counts()
+            st.markdown("#### 패턴별 요약")
+            st.dataframe(
+                pd.DataFrame(
+                    [{"구분": label, "행수": int(pattern_counts.get(label, 0))} for label in storage.pattern_labels()]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+
+            st.markdown("#### 기록 데이터")
+            pattern_filter = st.selectbox(
+                "패턴 구분",
+                options=["전체"] + storage.pattern_labels(),
+                index=0,
+                key="pattern_view_record_file",
+                on_change=lambda: st.session_state.update(pattern_page_idx=0),
+            )
+            if pattern_filter != "전체":
+                rdf = rdf[rdf[storage.PATTERN_COLUMN] == pattern_filter].reset_index(drop=True)
+            if rdf.empty:
+                st.info("선택한 패턴의 기록이 없습니다.")
+                return
+
             if "종목코드" not in rdf.columns:
                 st.error("기록 데이터에 종목코드 컬럼이 없습니다.")
                 return
@@ -1089,6 +1099,7 @@ def _render_saved_pattern_data() -> None:
             selected_idx_key = "pattern_selected_table_idx"
 
             table_df = page_df[[
+                storage.PATTERN_COLUMN,
                 "종목명",
                 "종목코드",
                 "주봉 or 월봉 선택",
@@ -1100,6 +1111,7 @@ def _render_saved_pattern_data() -> None:
             table_df.index.name = "No"
 
             pattern_table_column_config = {
+                storage.PATTERN_COLUMN: st.column_config.TextColumn(width="small"),
                 "종목명": st.column_config.TextColumn(width="small"),
                 "종목코드": st.column_config.TextColumn(width="small"),
                 "주봉 or 월봉 선택": st.column_config.TextColumn(width="small"),
