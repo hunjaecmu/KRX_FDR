@@ -331,19 +331,31 @@ function dividendTotals(rows){
 }
 function dividendForecast(month,accountId=''){
  const accounts=new Map(portfolio.accounts.map(a=>[a.id,a]));
+ const today=krDate();
+ const receipts=(portfolio.dividend_receipts||[]).filter(r=>r.received_on.slice(0,7)===month && r.received_on<=today && (!accountId||r.account_id===accountId));
+ const receiptsByHolding=new Map();
+ const holdingKey=(account,code)=>JSON.stringify([account,code.toUpperCase()]);
+ for(const receipt of receipts){
+  const key=holdingKey(receipt.account_id,receipt.code);
+  if(!receiptsByHolding.has(key))receiptsByHolding.set(key,[]);
+  receiptsByHolding.get(key).push(receipt);
+ }
  const rows=portfolio.holdings.filter(h=>!accountId||h.account_id===accountId).filter(h=>{
   const amount=h.dividend?.amount_per_share;
-  return amount===0?false:amount>0||h.style==='dividend';
+  return amount!==0&&(amount>0||h.style==='dividend'||compositionStyle(h)==='dividend');
  }).map(h=>{
   const perShare=h.dividend?.amount_per_share??null,day=h.dividend?.monthly_day??null;
   const amount=perShare===null?null:perShare*h.quantity;
-  return {holding:h,account:accounts.get(h.account_id),perShare,day,amount,date:expectedDividendDate(month,day)};
+  const actualReceipts=receiptsByHolding.get(holdingKey(h.account_id,h.code))||[];
+  const received=actualReceipts.filter(receipt=>receipt.amount>0);
+  return {holding:h,account:accounts.get(h.account_id),perShare,day,amount,date:expectedDividendDate(month,day),received,actualReceipts};
  });
- const configured=rows.filter(row=>row.amount!==null&&row.amount>0&&row.date);
+ const unpaid=rows.filter(row=>!row.received.length);
+ const configured=unpaid.filter(row=>row.amount!==null&&row.amount>0&&row.date);
  const grouped=new Map();
  for(const row of configured){if(!grouped.has(row.date))grouped.set(row.date,[]);grouped.get(row.date).push(row)}
  const schedules=[...grouped].sort(([a],[b])=>a.localeCompare(b)).map(([date,items])=>({date,rows:items,...dividendTotals(items)}));
- return {rows,configured,schedules,pending:rows.length-configured.length,...dividendTotals(configured)};
+ return {rows,configured,schedules,receipts,pending:unpaid.length-configured.length,...dividendTotals(configured)};
 }
 function dividendConvertedText(totals){return totals.missingFx?'<span class="muted">환율 미입력</span>':money(totals.krw)}
 function dividendAccountGroups(forecast){
@@ -351,40 +363,112 @@ function dividendAccountGroups(forecast){
  return portfolio.accounts.map(account=>{
   const rows=forecast.rows.filter(row=>row.holding.account_id===account.id).slice().sort((a,b)=>(a.day??32)-(b.day??32)||(a.holding.name||a.holding.code).localeCompare(b.holding.name||b.holding.code,'ko'));
   const entered=rows.filter(row=>configured.has(row));
-  return {account,rows,configured:entered,pending:rows.length-entered.length,...dividendTotals(entered)};
+  return {account,rows,configured:entered,pending:rows.filter(row=>!row.received?.length).length-entered.length,...dividendTotals(entered)};
  }).filter(group=>group.rows.length>0);
 }
+function holdingReceiptAmount(receipts){
+ if(!receipts.length)return '미기록';
+ const totals=receiptTotals(receipts);
+ const currencies=[...new Set(receipts.map(receipt=>receipt.currency))].sort();
+ return currencies.map(currency=>dividendAmountText(totals.amounts[currency],currency)).join('<br>');
+}
+function holdingReceiptKrw(receipts){
+ if(!receipts.length)return '미기록';
+ const totals=receiptTotals(receipts);
+ return totals.krw_total===null?'환율 미입력':money(totals.krw_total);
+}
+function receiptYieldOnCost(amount,receipt,holding){
+ if(!validNumber(amount)||!validNumber(holding.cost,Number.MIN_VALUE))return null;
+ let comparableAmount=amount;
+ if(receipt.currency!==holding.currency){
+  if(receipt.currency!=='USD'||holding.currency!=='KRW'||!validNumber(receipt.usd_krw,Number.MIN_VALUE))return null;
+  comparableAmount*=receipt.usd_krw;
+ }
+ const yieldPct=comparableAmount/holding.cost*100;
+ return Number.isFinite(yieldPct)?yieldPct:null;
+}
 function dividendHoldingRow(row){
- const h=row.holding,converted=dividendTotals([row]);
- const schedule=row.day?'매월 '+row.day+'일':'일정 미입력';
- return `<tr><td class="name-cell"><b>${esc(h.name||h.code)}</b><small>${esc(h.code)} · ${esc(h.currency)}</small></td><td class="num">${fmt(h.quantity,6)}</td><td>${schedule}${row.date?'<div class="data-date">'+esc(row.date)+'</div>':''}</td><td class="num">${dividendAmountText(row.perShare,h.currency)}</td><td class="num">${dividendAmountText(row.amount,h.currency)}</td><td class="num">${row.amount===null?'미입력':dividendConvertedText(converted)}</td><td><button class="mini-action" data-edit-dividend="${esc(h.id)}">배당 정보 수정</button></td></tr>`;
+ const h=row.holding;
+ const receipts=row.actualReceipts||[];
+ const orderedReceipts=[...receipts].sort((a,b)=>a.received_on.localeCompare(b.received_on));
+ const schedule=row.received?.length
+  ? '<span class="badge dividend">지급 완료</span>'
+  : (row.day?'매월 '+row.day+'일':'일정 미입력')+(row.date?'<div class="data-date">'+esc(row.date)+'</div>':'');
+ const cost=dividendAmountText(h.cost??null,h.currency);
+ const payments=orderedReceipts.map(receipt=>{
+  const amount=validNumber(h.quantity,Number.MIN_VALUE)?receipt.amount/h.quantity:null;
+  const yieldPct=receiptYieldOnCost(amount,receipt,h);
+  return {
+   amount:dividendAmountText(amount,receipt.currency),
+   yieldLabel:yieldPct===null?'—':fmt(yieldPct,2)+'%',
+   date:receipt.received_on
+  };
+ });
+ const perShare=payments.map(payment=>
+  `<div>${payment.amount} <span class="muted" title="지급 건별 주당 세후 수령액 ÷ 주당 평균 매수액 × 100">(${payment.yieldLabel})</span></div>`
+ ).join('')||'미기록';
+ const receiptDates=[...new Set(payments.map(payment=>payment.date))].map(date=>
+  `<div class="data-date">수령 ${esc(date)}</div>`
+ ).join('');
+ return `<tr>
+  <td class="name-cell"><b>${esc(h.name||h.code)}</b><small>${esc(h.code)} · ${esc(h.currency)}</small><button type="button" class="mini-action inline-receipt-open" data-open-inline-receipt="${esc(h.id)}" aria-expanded="false">실제 수령 입력</button></td>
+  <td class="num">${cost}</td>
+  <td class="num">${dividendAmountText(row.perShare,h.currency)}</td>
+  <td class="num dividend-receipt-per-share">${perShare}</td>
+  <td class="num">${fmt(h.quantity,6)}</td>
+  <td class="num">${holdingReceiptAmount(receipts)}</td>
+  <td class="dividend-receipt-status">${schedule}${receiptDates}</td>
+  <td class="num">${holdingReceiptKrw(receipts)}</td>
+  <td><button class="mini-action" data-edit-dividend="${esc(h.id)}">배당 정보 수정</button></td>
+ </tr>`;
 }
 function dividendAccountHoldings(forecast,month){
  return dividendAccountGroups(forecast).map(group=>{
-  const pendingOnly=!group.configured.length&&group.pending>0;
-  const native=pendingOnly?'미입력':'<b>'+dividendAmountText(group.amounts.KRW,'KRW')+'</b><div class="data-date">'+dividendAmountText(group.amounts.USD,'USD')+'</div>';
-  const converted=pendingOnly?'미입력':dividendConvertedText(group);
-  return `<tr class="dividend-account-group" data-dividend-account="${esc(group.account.id)}"><th colspan="7" scope="row"><b>${esc(group.account.name)}</b><span>${esc(month)} · ${group.rows.length}개 보유행</span></th></tr>`+group.rows.map(dividendHoldingRow).join('')+`<tr class="dividend-account-total"><th colspan="4" scope="row">${esc(group.account.name)} · ${esc(month)} 예상 배당 합계<small>일정·금액 입력분 ${group.configured.length}개 · 세전</small></th><td class="num">${native}</td><td class="num"><b>${converted}</b></td><td class="data-date">${group.pending?'미입력 '+group.pending+'개 제외':'입력 완료'}</td></tr>`;
- }).join('')||'<tr><td colspan="7" class="empty">등록된 배당 종목이 없습니다. 계좌 상세에서 예상 배당액과 일정을 입력하세요. 예상액 0인 종목은 제외됩니다.</td></tr>';
+  const receipts=[...new Map(group.rows.flatMap(row=>row.actualReceipts||[]).map(receipt=>[receipt.id,receipt])).values()];
+  return `<tr class="dividend-account-group" data-dividend-account="${esc(group.account.id)}"><th colspan="9" scope="row"><b>${esc(group.account.name)}</b><span>${esc(month)} · ${group.rows.length}개 보유행</span></th></tr>`
+   +group.rows.map(dividendHoldingRow).join('')
+   +`<tr class="dividend-account-total"><th colspan="5" scope="row">${esc(group.account.name)} · ${esc(month)} 보유 종목 실제 수령 합계<small>${receipts.length}건 · 세후</small></th><td class="num">${holdingReceiptAmount(receipts)}</td><td></td><td class="num"><b>${holdingReceiptKrw(receipts)}</b></td><td></td></tr>`;
+ }).join('')||'<tr><td colspan="9" class="empty">등록된 배당 종목이 없습니다.</td></tr>';
 }
 function dividendAccountSchedule(forecast){
- const dates=forecast.schedules.map(group=>group.date);
- const groups=dividendAccountGroups(forecast).map(group=>({...group,cells:dates.map(date=>{
-  const rows=group.configured.filter(row=>row.date===date);
-  return {date,rows,...dividendTotals(rows)};
- })}));
- return {dates,groups,hasPending:forecast.pending>0};
+ const dates=[...new Set([...forecast.schedules.map(group=>group.date),...forecast.receipts.map(r=>r.received_on)])].sort();
+ const groups=new Map(dividendAccountGroups(forecast).map(group=>[group.account.id,{...group,receipts:[]}]));
+ const accounts=new Map(portfolio.accounts.map(account=>[account.id,account]));
+ for(const receipt of forecast.receipts){
+  const id=receipt.account_id;
+  if(!groups.has(id)){
+   const account=accounts.get(id)||{id,name:receipt.account_name};
+   groups.set(id,{account,configured:[],pending:0,receipts:[]});
+  }
+  groups.get(id).receipts.push(receipt);
+ }
+ return {dates,groups:[...groups.values()],hasPending:forecast.pending>0};
 }
-function dividendMatrixAmount(totals,pendingOnly=false){
- if(pendingOnly)return '<span class="muted">미입력</span>';
+function dividendMatrixAmount(totals){
  const native=totals.amounts.USD>0?'<span class="data-date">'+(totals.amounts.KRW>0?dividendAmountText(totals.amounts.KRW,'KRW')+' · ':'')+dividendAmountText(totals.amounts.USD,'USD')+'</span>':'';
  return dividendConvertedText(totals)+native;
 }
+function dividendScheduleCell(expected,received,showEmpty=false,pending=0){
+ const actual=receiptTotals(received);
+ const paidLabel=received.some(r=>r.amount>0)?'지급 완료':'0원 기록';
+ const actualLine=received.length
+  ? '<div class="dividend-paid"><span class="badge dividend">'+(showEmpty?'수령':paidLabel)+'</span> '+dividendMatrixAmount({...actual,krw:actual.krw_total,missingFx:actual.missing_fx_count>0})+'</div>'
+  : showEmpty?'<div class="data-date">수령 기록 없음</div>':'';
+ const expectedLine=expected.length
+  ? '<div><span class="data-date">예정</span> '+dividendMatrixAmount(dividendTotals(expected))+'</div>'
+  : showEmpty?'<div class="data-date">'+(pending?'예상액 미입력':'예정 0원')+'</div>':'';
+ return actualLine+expectedLine||'<span class="muted">—</span>';
+}
 function dividendAccountScheduleTable(forecast){
- const matrix=dividendAccountSchedule(forecast),columns=matrix.dates.length+2+(matrix.hasPending?1:0);
+ const matrix=dividendAccountSchedule(forecast);
+ const columns=matrix.dates.length+2+(matrix.hasPending?1:0);
  const head='<tr><th scope="col">계좌</th>'+matrix.dates.map(date=>`<th scope="col" class="num" title="${esc(date)}">${Number(date.slice(-2))}일</th>`).join('')+(matrix.hasPending?'<th scope="col" class="num">미입력</th>':'')+'<th scope="col" class="num">월 합계</th></tr>';
- const rows=matrix.groups.map(group=>`<tr><th scope="row">${esc(group.account.name)}</th>`+group.cells.map(cell=>`<td class="num">${cell.rows.length?dividendMatrixAmount(cell):'<span class="muted" title="예정 배당 없음">—</span>'}</td>`).join('')+(matrix.hasPending?`<td class="num data-date">${group.pending?group.pending+'건':'—'}</td>`:'')+`<td class="num dividend-matrix-total"><b>${dividendMatrixAmount(group,!group.configured.length&&group.pending>0)}</b>${group.pending&&group.configured.length?'<div class="data-date">입력분</div>':''}</td></tr>`).join('')||`<tr><td colspan="${columns}" class="empty">계좌 상세에서 예상 배당액과 일정을 입력하세요.</td></tr>`;
- const foot='<tr><th scope="row">전체 합계</th>'+forecast.schedules.map(group=>`<td class="num">${dividendMatrixAmount(group)}</td>`).join('')+(matrix.hasPending?`<td class="num data-date">${forecast.pending}건</td>`:'')+`<td class="num dividend-matrix-total"><b>${dividendMatrixAmount(forecast,!forecast.configured.length&&forecast.pending>0)}</b>${forecast.pending&&forecast.configured.length?'<div class="data-date">입력분</div>':''}</td></tr>`;
+ const amountCells=(expected,received)=>matrix.dates.map(date=>`<td class="num">${dividendScheduleCell(expected.filter(row=>row.date===date),received.filter(r=>r.received_on===date))}</td>`).join('');
+ const pendingCell=count=>matrix.hasPending?`<td class="num data-date">${count?count+'건':'—'}</td>`:'';
+ const totalCell=(expected,received,pending)=>`<td class="num dividend-matrix-total">${dividendScheduleCell(expected,received,true,pending)}</td>`;
+ const rows=matrix.groups.map(group=>`<tr><th scope="row">${esc(group.account.name)}</th>`+amountCells(group.configured,group.receipts)+pendingCell(group.pending)+totalCell(group.configured,group.receipts,group.pending)+'</tr>').join('')
+  ||`<tr><td colspan="${columns}" class="empty">입력된 예상 일정이나 수령 내역이 없습니다.</td></tr>`;
+ const foot='<tr><th scope="row">전체 합계</th>'+amountCells(forecast.configured,forecast.receipts)+pendingCell(forecast.pending)+totalCell(forecast.configured,forecast.receipts,forecast.pending)+'</tr>';
  return {head,rows,foot};
 }
 function renderDividends(){
@@ -394,19 +478,75 @@ function renderDividends(){
  filter.value=portfolio.accounts.some(a=>a.id===oldAccount)?oldAccount:'';
  const forecast=dividendForecast(monthInput.value,filter.value);
  const matrix=dividendAccountScheduleTable(forecast);
- $('dividendMatrixMonth').textContent=monthInput.value+' · 세전 · 원화 환산';
+ const month=monthInput.value,today=krDate();
+ const asOf=month<today.slice(0,7)?expectedDividendDate(month,31):today;
+ const actual=receiptTotals(forecast.receipts);
+ const expectedAccounts=new Set(forecast.configured.map(row=>row.holding.account_id)).size;
+ $('dividendActualTotal').textContent=!forecast.receipts.length?'수령 기록 없음':actual.krw_total===null?'환율 미입력':money(actual.krw_total);
+ $('dividendActualAsOf').textContent=month>today.slice(0,7)?'(미래 조회 월)':'('+asOf+' 기준)';
+ $('dividendExpectedAccounts').textContent='(월 중 남은 배당 계좌 '+expectedAccounts+'개)';
+ $('dividendMatrixMonth').textContent=month+' · 실제 수령은 세후 · 남은 예상은 세전';
  $('dividendMatrixHead').innerHTML=matrix.head;$('dividendMatrixRows').innerHTML=matrix.rows;$('dividendMatrixTotals').innerHTML=matrix.foot;
  $('dividendMonthlyTotal').textContent=forecast.missingFx?'환율 미입력':!forecast.configured.length&&forecast.pending?'예상액 미입력':money(forecast.krw);
  $('dividendNativeTotal').textContent='KRW '+dividendAmountText(forecast.amounts.KRW,'KRW')+' · '+dividendAmountText(forecast.amounts.USD,'USD');
  $('dividendHoldingCount').textContent=forecast.rows.length;$('dividendScheduleCount').textContent=forecast.schedules.length;$('dividendPendingCount').textContent=forecast.pending;
- $('dividendSummaryNote').textContent=monthInput.value+' · 합계는 일정과 금액이 입력된 '+forecast.configured.length+'개 보유행의 세전 예상액입니다.'+(forecast.pending?' 미입력 '+forecast.pending+'개 보유행은 금액 합계에서 제외했습니다.':'')+(forecast.missingFx?' 달러 금액을 원화로 더하려면 왼쪽 환율을 입력하세요.':'');
+ $('dividendSummaryNote').textContent=monthInput.value+' · 남은 예상 합계는 일정과 금액이 입력된 '+forecast.configured.length+'개 보유행의 세전 예상액입니다.'+(forecast.pending?' 미입력 '+forecast.pending+'개 보유행은 금액 합계에서 제외했습니다.':'')+(forecast.missingFx?' 달러 금액을 원화로 더하려면 왼쪽 환율을 입력하세요.':'');
  $('dividendScheduleRows').innerHTML=forecast.schedules.map(group=>`<tr><td><b>${esc(group.date)}</b></td><td class="num">${group.rows.length}</td><td class="num">${dividendAmountText(group.amounts.KRW,'KRW')}</td><td class="num">${dividendAmountText(group.amounts.USD,'USD')}</td><td class="num"><b>${dividendConvertedText(group)}</b></td></tr>`).join('')||'<tr><td colspan="5" class="empty">일정과 예상 배당액을 입력하면 날짜별 합계가 표시됩니다.</td></tr>';
- $('dividendScheduleTotals').innerHTML=`<tr class="account-total-row"><th scope="row">월 예상 합계 · 입력분</th><td class="num">${forecast.configured.length}</td><td class="num">${dividendAmountText(forecast.amounts.KRW,'KRW')}</td><td class="num">${dividendAmountText(forecast.amounts.USD,'USD')}</td><td class="num"><b>${!forecast.configured.length&&forecast.pending?'미입력':dividendConvertedText(forecast)}</b></td></tr>`;
+ $('dividendScheduleTotals').innerHTML=`<tr class="account-total-row"><th scope="row">월 남은 예상 합계 · 입력분</th><td class="num">${forecast.configured.length}</td><td class="num">${dividendAmountText(forecast.amounts.KRW,'KRW')}</td><td class="num">${dividendAmountText(forecast.amounts.USD,'USD')}</td><td class="num"><b>${!forecast.configured.length&&forecast.pending?'미입력':dividendConvertedText(forecast)}</b></td></tr>`;
  $('dividendHoldingRows').innerHTML=dividendAccountHoldings(forecast,monthInput.value);
  renderDividendReceipts();
 }
 $('dividendMonth').onchange=renderDividends;$('dividendAccountFilter').onchange=renderDividends;
-$('dividendHoldingRows').onclick=e=>{const button=e.target.closest('[data-edit-dividend]');if(button){editHolding(button.dataset.editDividend);$('holdingDividendAmount').focus()}};
+function closeInlineReceipt(row){
+ const button=row.previousElementSibling?.querySelector('[data-open-inline-receipt]');
+ button?.setAttribute('aria-expanded','false');
+ row.remove();
+ return button;
+}
+function openInlineReceipt(button){
+ const body=$('dividendHoldingRows');
+ const existing=body.querySelector('[data-inline-receipt-row]');
+ if(existing && closeInlineReceipt(existing)===button)return;
+ const holding=portfolio.holdings.find(h=>h.id===button.dataset.openInlineReceipt);
+ if(!holding)return;
+ const today=krDate(),usd=holding.currency==='USD';
+ button.closest('tr').insertAdjacentHTML('afterend',`<tr data-inline-receipt-row><td colspan="9">
+  <form class="inline-receipt-form" data-receipt-holding="${esc(holding.id)}" aria-label="${esc(holding.name)} 실제 배당 수령 입력">
+   <label class="field">실제 수령일<input name="received_on" type="date" value="${today}" max="${today}" required></label>
+   <label class="field">실제 입금액 · 세후<input name="amount" type="number" min="0" max="1000000000000000" step="any" required></label>
+   <label class="field">입금 통화<select name="currency"><option value="KRW">KRW · 원</option><option value="USD"${usd?' selected':''}>USD · 달러</option></select></label>
+   <label class="field" data-inline-receipt-fx${usd?'':' hidden'}>환율 · USD/KRW<input name="fx" type="number" min="0.000001" max="10000000" step="any" placeholder="선택"${usd?'':' disabled'}></label>
+   <div class="inline-receipt-actions"><button type="submit" class="primary">수령 저장</button><button type="button" data-cancel-inline-receipt>취소</button></div>
+  </form></td></tr>`);
+ button.setAttribute('aria-expanded','true');
+ body.querySelector('[data-inline-receipt-row] input[name="amount"]').focus();
+}
+const dividendHoldingRows=$('dividendHoldingRows');
+dividendHoldingRows.onclick=e=>{
+ const open=e.target.closest('[data-open-inline-receipt]');
+ if(open){openInlineReceipt(open);return}
+ const cancel=e.target.closest('[data-cancel-inline-receipt]');
+ if(cancel){closeInlineReceipt(cancel.closest('tr'))?.focus();return}
+ const edit=e.target.closest('[data-edit-dividend]');
+ if(edit){editHolding(edit.dataset.editDividend);$('holdingDividendAmount').focus()}
+};
+dividendHoldingRows.onchange=e=>{
+ const currency=e.target.closest('[data-receipt-holding] select[name="currency"]');
+ if(!currency)return;
+ const usd=currency.value==='USD',form=currency.form;
+ form.querySelector('[data-inline-receipt-fx]').hidden=!usd;
+ form.elements.namedItem('fx').disabled=!usd;
+};
+dividendHoldingRows.onsubmit=e=>{
+ const form=e.target.closest('form[data-receipt-holding]');
+ if(!form)return;
+ e.preventDefault();
+ const holding=portfolio.holdings.find(h=>h.id===form.dataset.receiptHolding);
+ const account=holding&&portfolio.accounts.find(a=>a.id===holding.account_id);
+ if(!account){toast('수령 기록의 보유 종목을 다시 선택하세요.');return}
+ const value=name=>form.elements.namedItem(name).value;
+ saveDividendReceipt({account,code:holding.code,name:holding.name||holding.code,currency:value('currency'),receivedOn:value('received_on'),rawAmount:value('amount'),rawFx:value('fx')});
+};
 
 // Actual receipts are independent of current holdings and expected dividends.
 function validateDividendReceipts(doc){
@@ -462,35 +602,54 @@ function renderDividendReceipts(){
  select.innerHTML=receiptAccountOptions(old,editingReceiptId!==null);if(!select.value&&portfolio.accounts.length)select.value=portfolio.accounts[0].id;
  if(!$('receiptDate').value){$('receiptDate').value=krDate();$('receiptDate').max=krDate()}
  refreshReceiptHoldingOptions();updateReceiptCurrency();
- const month=$('receiptListMonth');if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month.value))month.value=krDate().slice(0,7);
- const filter=$('receiptListAccount'),oldFilter=filter.value;filter.innerHTML='<option value="">전체 계좌</option>'+receiptAccountOptions(oldFilter,true);filter.value=oldFilter;
- const rows=(portfolio.dividend_receipts||[]).filter(r=>r.received_on.startsWith(month.value)&&(!filter.value||r.account_id===filter.value)).slice().sort((a,b)=>b.received_on.localeCompare(a.received_on)||a.account_name.localeCompare(b.account_name,'ko')||a.name.localeCompare(b.name,'ko'));
- $('receiptRows').innerHTML=rows.map(r=>`<tr><td>${esc(r.received_on)}</td><td>${esc(r.account_name)}</td><td class="name-cell"><b>${esc(r.name)}</b><small>${esc(r.code)}</small></td><td class="num">${dividendAmountText(r.amount,r.currency)}</td><td class="num">${r.currency==='USD'?(r.usd_krw===null?'미입력':fmt(r.usd_krw,4)):'—'}</td><td class="num">${money(receiptTotals([r]).krw_total)}</td><td>${esc(r.memo)}</td><td class="actions-cell"><button type="button" data-edit-receipt="${esc(r.id)}">수정</button> <button type="button" class="danger" data-delete-receipt="${esc(r.id)}">삭제</button></td></tr>`).join('')||'<tr><td colspan="8" class="empty">이 월에 기록된 실제 배당 수령 내역이 없습니다.</td></tr>';
- const totals=receiptTotals(rows);$('receiptListSummary').textContent=month.value+' · '+rows.length+'건 · KRW '+dividendAmountText(totals.amounts.KRW,'KRW')+' · '+dividendAmountText(totals.amounts.USD,'USD')+' · 원화 환산 '+(totals.krw_total===null?'환율 미입력 '+totals.missing_fx_count+'건':money(totals.krw_total));
+ const records=$('receiptRecord'),selected=records.value;
+ const month=$('dividendMonth').value,accountId=$('dividendAccountFilter').value;
+ const rows=(portfolio.dividend_receipts||[])
+  .filter(r=>r.received_on.slice(0,7)===month&&(!accountId||r.account_id===accountId))
+  .sort((a,b)=>b.received_on.localeCompare(a.received_on)||a.account_name.localeCompare(b.account_name,'ko')||a.name.localeCompare(b.name,'ko'));
+ records.innerHTML='<option value="">'+(rows.length?'수정할 수령 기록 선택':'조회 월 수령 기록 없음')+'</option>'
+  +rows.map(r=>`<option value="${esc(r.id)}">${esc(r.received_on)} · ${esc(r.account_name)} · ${esc(r.name)} · ${esc(dividendAmountText(r.amount,r.currency))}</option>`).join('');
+ records.value=rows.some(r=>r.id===selected)?selected:'';
+ updateReceiptRecordActions();
+}
+function updateReceiptRecordActions(){
+ const disabled=!$('receiptRecord').value;
+ $('editReceiptRecord').disabled=disabled;
+ $('deleteReceiptRecord').disabled=disabled;
 }
 function renderDividendReceiptHistory(){
  const account=$('receiptHistoryAccount'),old=account.value;account.innerHTML='<option value="">전체 계좌</option>'+receiptAccountOptions(old,true);account.value=old;
  const receipts=(portfolio.dividend_receipts||[]).filter(r=>!account.value||r.account_id===account.value);
  const year=$('receiptHistoryYear').value;
  const rows=monthlyDividendReceipts(receipts).filter(row=>!year||row.month.startsWith(year+'-')).reverse();
- $('receiptMonthlyRows').innerHTML=rows.map(row=>`<tr><td><b>${esc(row.month)}</b></td><td class="num">${row.receipt_count}</td><td class="num">${dividendAmountText(row.amounts.KRW,'KRW')}</td><td class="num">${dividendAmountText(row.amounts.USD,'USD')}</td><td class="num">${row.krw_total===null?'환율 미입력 '+row.missing_fx_count+'건':money(row.krw_total)}</td><td class="num ${colorClass(row.change_krw)}">${row.change_krw===null?'—':(row.change_krw>0?'+':row.change_krw<0?'−':'')+money(Math.abs(row.change_krw))}</td><td class="num ${colorClass(row.change_pct)}">${percent(row.change_pct)}${row.change_status?'<div class="data-date">'+esc(row.change_status)+'</div>':''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">배당주 관리 하단에서 실제 수령 내역을 저장하면 월별 기록이 표시됩니다.</td></tr>';
+ $('receiptMonthlyRows').innerHTML=rows.map(row=>`<tr><td><b>${esc(row.month)}</b></td><td class="num">${row.receipt_count}</td><td class="num">${dividendAmountText(row.amounts.KRW,'KRW')}</td><td class="num">${dividendAmountText(row.amounts.USD,'USD')}</td><td class="num">${row.krw_total===null?'환율 미입력 '+row.missing_fx_count+'건':money(row.krw_total)}</td><td class="num ${colorClass(row.change_krw)}">${row.change_krw===null?'—':(row.change_krw>0?'+':row.change_krw<0?'−':'')+money(Math.abs(row.change_krw))}</td><td class="num ${colorClass(row.change_pct)}">${percent(row.change_pct)}${row.change_status?'<div class="data-date">'+esc(row.change_status)+'</div>':''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">배당주 관리에서 실제 수령 내역을 저장하면 월별 기록이 표시됩니다.</td></tr>';
  $('receiptMonthlyNote').textContent='실제 입금일 기준 · 건별 저장 환율 사용 · '+rows.length+'개 월 표시. 전월 기록이나 환율이 없으면 변화량을 보류합니다. 전월 0원은 변화율을 산출하지 않습니다. 미기록 월은 0원으로 간주하지 않습니다.';
+}
+function saveDividendReceipt({account,old,code,name,currency,receivedOn,rawAmount,rawFx,memo=''}){
+ if(!realDate(receivedOn)||receivedOn>krDate()||rawAmount.trim()===''){
+  toast('실제 수령일과 입금액을 입력하세요. 미래 수령일은 기록할 수 없습니다.');
+  return false;
+ }
+ const now=new Date().toISOString();
+ const record={id:old?.id||uid(),account_id:account?.id||old.account_id,account_name:account?.name||old.account_name,code:code.trim().toUpperCase(),name:name.trim(),currency,amount:Number(rawAmount),received_on:receivedOn,usd_krw:currency==='USD'&&rawFx.trim()!==''?Number(rawFx):null,memo:memo.trim(),created_at:old?.created_at||now,updated_at:now};
+ try{validateDividendReceipts({dividend_receipts:[record]})}catch(error){toast(error.message);return false}
+ const records=portfolio.dividend_receipts||[];
+ const duplicate=records.some(r=>r.id!==record.id&&r.account_id===record.account_id&&r.code===record.code&&r.received_on===receivedOn&&r.currency===currency&&r.amount===record.amount);
+ if(duplicate&&!confirm('같은 계좌·종목·수령일·금액의 기록이 있습니다. 별도 지급 건으로 추가할까요?'))return false;
+ if(!old&&records.length>=100000){toast('수령 기록은 최대 100,000건까지 저장할 수 있습니다.');return false}
+ if(old)portfolio.audit.push({at:now,action:'배당 수령 수정 전 값',receipt:structuredClone(old)});
+ portfolio.dividend_receipts=old?records.map(r=>r.id===old.id?record:r):[...records,record];
+ persistDividendReceipts(old?'배당 수령 수정':'배당 수령 추가');
+ toast('실제 배당 수령 내역을 저장했습니다.');
+ return true;
 }
 function submitDividendReceipt(e){
  e.preventDefault();
  const old=(portfolio.dividend_receipts||[]).find(r=>r.id===editingReceiptId),account=portfolio.accounts.find(a=>a.id===$('receiptAccount').value);
  if(editingReceiptId&&!old)return toast('수정할 수령 기록이 없습니다. 다시 선택하세요.');
  if(!account&&!(old&&old.account_id===$('receiptAccount').value))return toast('계좌를 선택하세요.');
- const received_on=$('receiptDate').value,rawAmount=$('receiptAmount').value,rawFx=$('receiptFx').value,currency=$('receiptCurrency').value,now=new Date().toISOString();
- if(!realDate(received_on)||received_on>krDate()||rawAmount.trim()==='')return toast('실제 수령일과 입금액을 입력하세요. 미래 수령일은 기록할 수 없습니다.');
- const record={id:old?.id||uid(),account_id:account?.id||old.account_id,account_name:account?.name||old.account_name,code:$('receiptCode').value.trim().toUpperCase(),name:$('receiptName').value.trim(),currency,amount:Number(rawAmount),received_on,usd_krw:currency==='USD'&&rawFx.trim()!==''?Number(rawFx):null,memo:$('receiptMemo').value.trim(),created_at:old?.created_at||now,updated_at:now};
- try{validateDividendReceipts({dividend_receipts:[record]})}catch(error){return toast(error.message)}
- if((portfolio.dividend_receipts||[]).some(r=>r.id!==record.id&&r.account_id===record.account_id&&r.code===record.code&&r.received_on===received_on&&r.currency===currency&&r.amount===record.amount)&&!confirm('같은 계좌·종목·수령일·금액의 기록이 있습니다. 별도 지급 건으로 추가할까요?'))return;
- const records=portfolio.dividend_receipts||[];
- if(!old&&records.length>=100000)return toast('수령 기록은 최대 100,000건까지 저장할 수 있습니다.');
- if(old)portfolio.audit.push({at:now,action:'배당 수령 수정 전 값',receipt:structuredClone(old)});
- portfolio.dividend_receipts=old?records.map(r=>r.id===old.id?record:r):[...records,record];
- $('receiptListMonth').value=received_on.slice(0,7);resetDividendReceiptForm();persistDividendReceipts(old?'배당 수령 수정':'배당 수령 추가');toast('실제 배당 수령 내역을 저장했습니다. 기록·파일에서 월별 변화를 확인하세요.');
+ const saved=saveDividendReceipt({account,old,code:$('receiptCode').value,name:$('receiptName').value,currency:$('receiptCurrency').value,receivedOn:$('receiptDate').value,rawAmount:$('receiptAmount').value,rawFx:$('receiptFx').value,memo:$('receiptMemo').value});
+ if(saved)resetDividendReceiptForm();
 }
 function editDividendReceipt(id){
  const r=(portfolio.dividend_receipts||[]).find(item=>item.id===id);if(!r)return;
@@ -511,8 +670,9 @@ $('receiptForm').onsubmit=submitDividendReceipt;$('cancelReceiptEdit').onclick=r
 $('receiptAccount').onchange=()=>{$('receiptHolding').value='';refreshReceiptHoldingOptions()};
 $('receiptHolding').onchange=()=>{const h=portfolio.holdings.find(h=>h.id===$('receiptHolding').value&&h.account_id===$('receiptAccount').value);if(!h)return;$('receiptCode').value=h.code;$('receiptName').value=h.name;$('receiptCurrency').value=h.currency;$('receiptFx').value='';updateReceiptCurrency()};
 $('receiptCurrency').onchange=()=>{$('receiptFx').value='';updateReceiptCurrency()};
-$('receiptRows').onclick=e=>{const edit=e.target.closest('[data-edit-receipt]'),del=e.target.closest('[data-delete-receipt]');if(edit)editDividendReceipt(edit.dataset.editReceipt);else if(del)deleteDividendReceipt(del.dataset.deleteReceipt)};
-$('receiptListMonth').onchange=renderDividendReceipts;$('receiptListAccount').onchange=renderDividendReceipts;
+$('receiptRecord').onchange=updateReceiptRecordActions;
+$('editReceiptRecord').onclick=()=>editDividendReceipt($('receiptRecord').value);
+$('deleteReceiptRecord').onclick=()=>deleteDividendReceipt($('receiptRecord').value);
 $('receiptHistoryAccount').onchange=renderDividendReceiptHistory;$('receiptHistoryYear').oninput=renderDividendReceiptHistory;
 $('exportReceiptCSV').onclick=()=>exportDividendReceiptCSV(false);$('exportReceiptMonthlyCSV').onclick=()=>exportDividendReceiptCSV(true);
 $('receiptRetrySave').onclick=()=>$('retryPortfolioSave').onclick();$('receiptExportJSON').onclick=()=>exportJSON();
