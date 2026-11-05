@@ -299,6 +299,7 @@ function init(){if(!MARKET){toast('시장 데이터가 없습니다. Python 생�
 // The page never executes a shell command. The fixed-purpose CMD starts Python.
 
 const DASHBOARD_LAUNCHER=/*__KRX_LAUNCHER__*/null;
+const DASHBOARD_LAUNCHER_NAME=/*__KRX_LAUNCHER_NAME__*/"portfolio_dashboard_start.cmd";
 
 let marketUpdateRunning=false,marketPollingTimer=null;
 
@@ -382,7 +383,8 @@ updateButton.onclick=requestMarketUpdate;
 
 $('closeServerLauncher').onclick=()=>$('serverLauncherDialog').close();
 
-$('downloadServerLauncher').onclick=e=>{e.preventDefault();if(!DASHBOARD_LAUNCHER)return toast('프로젝트 폴더의 portfolio_dashboard_start.cmd를 열어주세요.');download(DASHBOARD_LAUNCHER,'portfolio_dashboard_start.cmd','application/octet-stream')};
+$('downloadServerLauncher').onclick=e=>{e.preventDefault();if(!DASHBOARD_LAUNCHER)return toast('프로젝트 폴더의 '+DASHBOARD_LAUNCHER_NAME+'를 열어주세요.');download(DASHBOARD_LAUNCHER,DASHBOARD_LAUNCHER_NAME,'application/octet-stream')};
+if(DASHBOARD_LAUNCHER_NAME!=='portfolio_dashboard_start.cmd'){const a=$('downloadServerLauncher');a.href=a.download=DASHBOARD_LAUNCHER_NAME;a.textContent='실행 파일 받기 (.command)';a.closest('.panel-body').querySelectorAll('b').forEach(b=>{if(b.textContent==='portfolio_dashboard_start.cmd')b.textContent=DASHBOARD_LAUNCHER_NAME})}
 
 const launchQuery=new URLSearchParams(location.search);
 

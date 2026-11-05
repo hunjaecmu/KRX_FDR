@@ -24,7 +24,7 @@
 python scripts/scan_market.py
 ```
 
-Windows cmd에서는 프로젝트 폴더의 `scan.cmd`로 같은 스캔을 실행합니다. 스캔은 저장된 데이터를 그대로 쓰므로, 오늘 시세를 반영하려면 먼저 `update.cmd`로 데이터를 업데이트합니다.
+Windows cmd에서는 프로젝트 폴더의 `scan.cmd`로, macOS에서는 `scan.command`(Finder에서 더블클릭 또는 `./scan.command`)로 같은 스캔을 실행합니다. 스캔은 저장된 데이터를 그대로 쓰므로, 오늘 시세를 반영하려면 먼저 `update.cmd`(macOS는 `update.command`)로 데이터를 업데이트합니다.
 
 ```bat
 scan
