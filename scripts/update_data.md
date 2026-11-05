@@ -21,7 +21,7 @@
 python scripts/update_data.py
 ```
 
-Windows cmd에서는 프로젝트 폴더의 `update.cmd`로 같은 업데이트를 실행합니다. 스캔(`scan.cmd`)은 시세를 받지 않으므로, 업데이트를 먼저 실행한 뒤 스캔합니다.
+Windows cmd에서는 프로젝트 폴더의 `update.cmd`로, macOS에서는 `update.command`(Finder에서 더블클릭 또는 `./update.command`)로 같은 업데이트를 실행합니다. 스캔(`scan.cmd`, macOS는 `scan.command`)은 시세를 받지 않으므로, 업데이트를 먼저 실행한 뒤 스캔합니다.
 
 ```bat
 update

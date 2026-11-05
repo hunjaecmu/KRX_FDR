@@ -197,7 +197,7 @@ def export_dashboard(data_dir=None, output_dir=ROOT, progress=None):
     atomic_text(manifest_path, dumps(manifest))
     atomic_text(target / "market.json", dumps(payload))
     template = (ROOT / "portfolio_dashboard.template.html").read_text(encoding="utf-8")
-    atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
+    atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace('/*__KRX_LAUNCHER_NAME__*/"portfolio_dashboard_start.cmd"', script_json(LAUNCHER_NAME)).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
     if progress:
         progress(len(symbols), len(symbols))
     print(dumps({"html": str(output_dir / "portfolio_dashboard.html"), "symbols": len(result),
@@ -213,7 +213,7 @@ def render_existing(output_dir=ROOT):
         atomic_text(output_dir / "portfolio_asset_management.js", (ROOT / "portfolio_asset_management.js").read_text(encoding="utf-8"))
     payload = json.loads((output_dir / "portfolio_dashboard_data" / "market.json").read_text(encoding="utf-8"))
     template = (ROOT / "portfolio_dashboard.template.html").read_text(encoding="utf-8")
-    atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
+    atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace('/*__KRX_LAUNCHER_NAME__*/"portfolio_dashboard_start.cmd"', script_json(LAUNCHER_NAME)).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
     print(dumps({"html": str(output_dir / "portfolio_dashboard.html"), "mode": "render-existing", "symbols": len(payload["symbols"])}), flush=True)
     return payload
 
@@ -259,7 +259,7 @@ def refresh_symbol(code, output_dir=ROOT):
     atomic_text(manifest_path, dumps(manifest))
     atomic_text(target / "market.json", dumps(payload))
     template = (ROOT / "portfolio_dashboard.template.html").read_text(encoding="utf-8")
-    atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
+    atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace('/*__KRX_LAUNCHER_NAME__*/"portfolio_dashboard_start.cmd"', script_json(LAUNCHER_NAME)).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
     return updated
 
 
@@ -296,9 +296,18 @@ def start_market_update():
     return True
 
 
+LAUNCHER_NAME = "portfolio_dashboard_start.cmd" if os.name == "nt" else "portfolio_dashboard_start.command"
+
+
 def launcher_text():
-    # A browser cannot execute Python. The downloaded fixed-purpose CMD invokes
+    # A browser cannot execute Python. The downloaded fixed-purpose launcher invokes
     # only this script; it also works when saved outside the project directory.
+    if os.name != "nt":
+        import shlex
+        return ('#!/bin/bash\n'
+                + f'{shlex.quote(sys.executable)} -B {shlex.quote(str(ROOT / "portfolio_dashboard.py"))} --launch\n'
+                + 'if [ $? -ne 0 ]; then\n echo "Unable to start KRX Portfolio. See the message above."\n'
+                + ' read -n 1 -s -r -p "Press any key to close"\nfi\n')
     content = ('@echo off\r\nsetlocal\r\n'
                + f'"{sys.executable}" -B "{ROOT / "portfolio_dashboard.py"}" --launch\r\n'
                + 'if errorlevel 1 (\r\n echo Unable to start KRX Portfolio. See the message above.\r\n pause\r\n)\r\n')
@@ -306,7 +315,10 @@ def launcher_text():
 
 
 def write_launcher():
-    (ROOT / "portfolio_dashboard_start.cmd").write_bytes(launcher_text().encode("utf-8"))
+    path = ROOT / LAUNCHER_NAME
+    path.write_bytes(launcher_text().encode("utf-8"))
+    if os.name != "nt":
+        path.chmod(0o755)
 
 
 def local_request(url, data=None):
@@ -580,14 +592,14 @@ def serve(port):
                     return self.respond(200, json.loads((ROOT / "portfolio_dashboard_data" / "market.json").read_text(encoding="utf-8")))
                 except (ValueError, OSError) as exc:
                     return self.respond(500, {"error": str(exc)[:200]})
-            if path == "/portfolio_dashboard_start.cmd":
-                file = ROOT / "portfolio_dashboard_start.cmd"
+            if path in {"/portfolio_dashboard_start.cmd", "/portfolio_dashboard_start.command"}:
+                file = ROOT / LAUNCHER_NAME
                 if not file.exists():
                     write_launcher()
                 raw = file.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Disposition", 'attachment; filename="portfolio_dashboard_start.cmd"')
+                self.send_header("Content-Disposition", f'attachment; filename="{LAUNCHER_NAME}"')
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
                 return self.wfile.write(raw)

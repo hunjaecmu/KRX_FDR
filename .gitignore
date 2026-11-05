@@ -35,3 +35,4 @@ build/
 *.egg-info
 *.log
 
+/portfolio_dashboard_start.command

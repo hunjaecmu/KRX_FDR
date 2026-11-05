@@ -149,7 +149,9 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 - 데이터 업데이트 전용 실행
   - `scripts/update_data.py`
 - 스캔 전용 실행
-  - `scripts/scan_market.py`, Windows cmd에서는 `scan`
+  - `scripts/scan_market.py`, Windows cmd에서는 `scan`, macOS에서는 `./scan.command`
+- 데이터 업데이트 실행기
+  - Windows `update.cmd`, macOS `update.command`
 - 서버용 데이터 묶음 업로드
   - `scripts/publish_lite_data.py` (전체 업데이트와 스캔 후 자동 실행)
 
