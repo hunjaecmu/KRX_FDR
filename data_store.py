@@ -12,8 +12,31 @@ from typing import Optional, Dict, List
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import pandas as pd
+import requests
 import FinanceDataReader as fdr
 from config import DATA_DIR, INDEX_TICKERS
+
+# FinanceDataReader는 timeout 없이 requests를 호출한다. 서버가 연결을 유지한 채
+# 응답하지 않으면 무한 대기하고 재시도도 동작하지 않으므로 기본 timeout을 건다.
+# (연결 10초, 응답 읽기 30초)
+REQUEST_TIMEOUT = (10, 30)
+
+
+def _install_default_request_timeout():
+    original = requests.Session.request
+    if getattr(original, "_krx_default_timeout", False):
+        return
+
+    def request_with_timeout(self, method, url, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = REQUEST_TIMEOUT
+        return original(self, method, url, **kwargs)
+
+    request_with_timeout._krx_default_timeout = True
+    requests.Session.request = request_with_timeout
+
+
+_install_default_request_timeout()
 
 # =========================================================
 # 설정
@@ -32,7 +55,8 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 MASTER_FILE = os.path.join(MASTER_DIR, "kospi_tickers.csv")
 
 START_YEARS_AGO = 25
-SLEEP_SEC_BETWEEN_TICKERS = 0.03
+# 요청이 몰리면 네이버 차트 서버가 응답을 멈추는 일이 있어 간격을 둔다.
+SLEEP_SEC_BETWEEN_TICKERS = 0.15
 SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
 # 전체 시세를 메모리에 오래 유지하지 않으면서 디스크 쓰기 횟수를 줄이는 기준.
@@ -383,26 +407,6 @@ def fetch_ohlcv_with_retry(
 
     raise last_error
 
-
-def fetch_ohlcv_with_retry(
-    code: str,
-    start_date: str,
-    end_date: str,
-    metadata: Dict[str, str],
-) -> pd.DataFrame:
-    last_error = None
-
-    for attempt in range(1, MAX_RETRY + 1):
-        try:
-            df = fdr.DataReader(code, start_date, end_date)
-            cleaned = clean_fdr_ohlcv(df)
-            return attach_run_metadata(cleaned, metadata)
-        except Exception as e:
-            last_error = e
-            print(f"[RETRY {attempt}/{MAX_RETRY}] {code} 조회 실패: {e}")
-            time.sleep(1.2 * attempt)
-
-    raise last_error
 
 def get_last_date_and_status(df: pd.DataFrame) -> tuple[Optional[str], Optional[str]]:
     """load_raw_daily 결과(날짜순 정렬, 중복 제거)의 마지막 날짜와 price_status."""
