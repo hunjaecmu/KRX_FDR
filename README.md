@@ -80,8 +80,9 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
 ### A. 데이터 수집/정규화
 
 - FinanceDataReader 기반 KRX 종목/일봉 수집
-- 증분 업데이트 + 재시도 로직
-- daily update 시 RAW 파일은 50종목 단위 메모리 버퍼로 모아 저장하여 종목별 디스크 쓰기를 줄임
+- 증분 업데이트 + 재시도 로직 (실패 종목은 끝에 한 번 더 시도)
+- 수집 → 일일 시세 파일(`data/daily_close/YYYYMMDD_HHMMSS.zip`) → 종목 파일 반영 순서. 수집 중 멈춰도 종목 파일은 그대로
+- 이미 확정 저장한 종가는 다시 받지 않음 (마지막 종가 다음 날부터, 장중 봉은 그 날부터 다시 받음)
 - 거래량 0 봉 보정 규칙 적용
   - `volume == 0`이면 OHLC를 마지막 거래일 종가로 보정
 - 이동평균 계산 시 거래량 0 봉 제외
@@ -154,6 +155,10 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - Windows `update.cmd`, macOS `update.command`
 - 서버용 데이터 묶음 업로드
   - `scripts/publish_lite_data.py` (전체 업데이트와 스캔 후 자동 실행)
+- 평일 저녁 자동 스캔(macOS)과 텔레그램 알림
+  - `scripts/mac/nightly_scan.sh`, 등록은 `scripts/mac/install_nightly.sh` (`scripts/mac/nightly_scan.md`)
+- 다른 PC와 데이터 공유 (iCloud Drive): 매일 일일 시세 파일(수백 KB), 주 1회 전체 묶음
+  - 내보내기 `scripts/share_full_data.py export`, 받기 Windows `pull.cmd` / macOS `pull.command` (반영 후 스캔)
 
 ### F. 웹 앱 상호작용 확장
 
@@ -263,6 +268,7 @@ python -m unittest discover -s tests
 - `lite/deploy.md`
 - `THIRD_PARTY_NOTICES.md`
 - `scripts/*.md`
+- `scripts/mac/nightly_scan.md`
 
 ## 참고
 
