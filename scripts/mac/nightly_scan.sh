@@ -3,7 +3,7 @@
 #   1) 데이터 업데이트  scripts/update_data.py
 #   2) 이평 돌파 스캔   scripts/scan_market.py
 #   3) GitHub 묶음 업로드 scripts/publish_lite_data.py
-#   4) iCloud 전체 데이터 scripts/share_full_data.py export
+#   4) iCloud 공유       scripts/share_full_data.py export (일일 시세 파일, 주 1회 전체 묶음)
 #   5) 텔레그램 알림 (OpenClaw)
 # 설정: 프로젝트 폴더의 nightly.env (git 제외). 예시는 scripts/mac/nightly.env.example
 # 일정 등록/해제: scripts/mac/install_nightly.sh
@@ -98,7 +98,7 @@ if [ "$SCAN" = ok ]; then
     fi
     unset TOKEN
 
-    log "▶ iCloud 전체 데이터"
+    log "▶ iCloud 공유"
     if caffeinate -i "$PY" -u scripts/share_full_data.py export; then SHARE=ok; else SHARE=fail; fi
 fi
 
