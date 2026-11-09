@@ -154,6 +154,10 @@ KRX(KOSPI/KOSDAQ 및 한국 ETF) 시세 데이터를 수집하고, 이동평균 
   - Windows `update.cmd`, macOS `update.command`
 - 서버용 데이터 묶음 업로드
   - `scripts/publish_lite_data.py` (전체 업데이트와 스캔 후 자동 실행)
+- 평일 저녁 자동 스캔(macOS)과 텔레그램 알림
+  - `scripts/mac/nightly_scan.sh`, 등록은 `scripts/mac/install_nightly.sh` (`scripts/mac/nightly_scan.md`)
+- 다른 PC와 전체 데이터 공유 (iCloud Drive)
+  - 내보내기 `scripts/share_full_data.py export`, 받기 Windows `pull.cmd` / macOS `pull.command`
 
 ### F. 웹 앱 상호작용 확장
 
@@ -263,6 +267,7 @@ python -m unittest discover -s tests
 - `lite/deploy.md`
 - `THIRD_PARTY_NOTICES.md`
 - `scripts/*.md`
+- `scripts/mac/nightly_scan.md`
 
 ## 참고
 
