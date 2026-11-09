@@ -52,7 +52,7 @@ def update_line(since: float) -> str:
     updated = counts.get("incr", 0) + counts.get("init", 0) + counts.get("refresh", 0)
     line = f"종목 {len(df):,}개 중 갱신 {updated:,}"
     if counts.get("refresh"):
-        line += f" (수정주가 재수신 {counts['refresh']:,})"
+        line += f" (전체 재수신 {counts['refresh']:,})"
     if failed:
         line += f" · 실패 {failed:,}"
     return line

@@ -510,34 +510,6 @@ def _finalize_past_rows(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     return result
 
 
-# 마지막 확정 봉 몇 개를 다시 받아 저장값과 비교한다.
-OVERLAP_DAYS = 5
-
-
-def _compare_overlap(saved: pd.DataFrame, fetched_df: pd.DataFrame) -> tuple[bool, pd.DataFrame]:
-    """
-    다시 받은 겹치는 봉을 저장값과 비교한다.
-    - 종가가 2일 이상 다르면 액면분할·증자 등으로 과거 가격이 수정된 것 → (True, 빈 표)
-    - 그보다 적게 다르면 그 날의 정정값만 돌려준다 → (False, 정정할 봉)
-    거래정지(거래량 0) 봉의 종가는 비교하지 않는다.
-    """
-    cols = ["open", "high", "low", "close", "volume"]
-    old = saved.assign(date=pd.to_datetime(saved["date"])).set_index("date")[cols]
-    new = fetched_df.assign(date=pd.to_datetime(fetched_df["date"]))
-    new = new[new["date"].isin(old.index)]
-    if new.empty:
-        return False, new
-    joined = new.set_index("date")[cols].join(old.add_suffix("_old"))
-    traded = (joined["volume"] > 0) & (joined["volume_old"] > 0)
-    close_changed = traded & ((joined["close"] - joined["close_old"]).abs() >= 1)
-    if int(close_changed.sum()) >= 2:
-        return True, new.iloc[0:0]
-    changed = pd.Series(False, index=joined.index)
-    for c in cols:
-        changed |= (joined[c] - joined[c + "_old"]).abs() >= 1
-    return False, new[new["date"].isin(joined.index[changed])]
-
-
 def collect_one_stock(code: str, name: str) -> Dict:
     """
     한 종목의 새 시세를 받아 '_delta'로 돌려준다. 종목 파일은 건드리지 않는다.
@@ -568,12 +540,11 @@ def collect_one_stock(code: str, name: str) -> Dict:
             final = tail[tail["price_status"].astype(str).str.strip() != "장중"]
             intraday = tail[tail["price_status"].astype(str).str.strip() == "장중"]
             if not final.empty:
-                overlap = final.tail(OVERLAP_DAYS)
-                base_row = overlap.iloc[-1]
-            # 마지막 확정 봉 몇 개부터 다시 받아 수정주가 여부를 확인하고, 그 뒤의 장중 봉은 새 값으로 바꾼다.
+                base_row = final.iloc[-1]
+            # 이미 확정 저장한 종가는 다시 보지 않는다. 그 다음 날부터, 장중 봉이 있으면 그 날부터 받는다.
             start_candidates = []
             if base_row is not None:
-                start_candidates.append(pd.to_datetime(overlap["date"]).min())
+                start_candidates.append(pd.to_datetime(base_row["date"]) + timedelta(days=1))
             if not intraday.empty:
                 start_candidates.append(pd.to_datetime(intraday["date"]).min())
             start_date = min(start_candidates).strftime("%Y-%m-%d")
@@ -581,13 +552,6 @@ def collect_one_stock(code: str, name: str) -> Dict:
     fetch_started = time.perf_counter()
     try:
         new_df = fetch_ohlcv_with_retry(code, start_date, end_date, metadata=run_meta)
-        corrections = new_df.iloc[0:0]
-        if mode == "incr" and base_row is not None:
-            adjusted, corrections = _compare_overlap(overlap, new_df)
-            if adjusted:
-                print(f"[RAW][ADJUST] {code} {name} 과거 종가가 여러 날 달라져 전체 이력을 다시 받습니다.")
-                mode = "refresh"
-                new_df = fetch_ohlcv_with_retry(code, initial_start_date(), end_date, metadata=run_meta)
         fetch_sec = round(time.perf_counter() - fetch_started, 3)
     except Exception as e:
         return {
@@ -601,9 +565,8 @@ def collect_one_stock(code: str, name: str) -> Dict:
 
     new_df = new_df.dropna(how="all", subset=["open", "high", "low", "close"])
     if mode == "incr" and base_row is not None:
-        # 이미 확정 저장된 봉은 값이 정정된 날만 다시 쓴다.
-        later = new_df[pd.to_datetime(new_df["date"]) > pd.to_datetime(base_row["date"])]
-        new_df = pd.concat([corrections, later], ignore_index=True)
+        # 이미 확정 저장된 봉은 다시 쓰지 않는다.
+        new_df = new_df[pd.to_datetime(new_df["date"]) > pd.to_datetime(base_row["date"])]
     if new_df.empty:
         return {"status": "empty", "message": "신규 데이터 없음", "rows": 0, "updated": False, "fetch_sec": fetch_sec}
 

@@ -62,59 +62,31 @@ class CollectOneStockTests(unittest.TestCase):
         self.assertEqual(res["status"], "skip")
         fetch.assert_not_called()
 
-    def test_incremental_refetches_last_saved_day_and_keeps_only_new_rows(self):
+    def test_incremental_starts_after_last_final_day(self):
         self.save([("2026-10-30", "종가"), ("2026-11-02", "종가")])
-        res, fetch = self.run_collect(fetched(["2026-10-30", "2026-11-02", "2026-11-03"], close=105))
+        res, fetch = self.run_collect(fetched(["2026-11-03"], close=105))
         self.assertEqual(res["status"], "incr")
-        self.assertEqual(fetch.call_args.args[1], "2026-10-30")
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(fetch.call_args.args[1], "2026-11-03")
         delta = res["_delta"]
         self.assertEqual(list(delta["date"].dt.strftime("%Y-%m-%d")), ["2026-11-03"])
         self.assertEqual(delta["mode"].iloc[0], "incr")
         self.assertEqual(delta["code"].iloc[0], "005930")
 
-    def test_changed_close_on_several_days_refetches_full_history(self):
-        self.save([("2026-10-30", "종가"), ("2026-11-02", "종가")])
-        full = fetched(["2026-10-30", "2026-11-02", "2026-11-03"], close=52)
-        res, fetch = self.run_collect(fetched(["2026-10-30", "2026-11-02", "2026-11-03"], close=52), full)
-        self.assertEqual(fetch.call_args_list[0].args[1], "2026-10-30")
-        self.assertEqual(res["status"], "refresh")
-        self.assertEqual(fetch.call_args.args[1], ds.initial_start_date())
-        self.assertEqual(len(res["_delta"]), 3)
-        self.assertEqual(res["_delta"]["mode"].iloc[0], "full")
-
-    def test_single_corrected_day_is_rewritten_without_full_refetch(self):
-        self.save([("2026-10-30", "종가"), ("2026-11-02", "종가")])
-        new = fetched(["2026-10-30", "2026-11-02", "2026-11-03"], close=105)
-        new.loc[1, "close"] = 104
-        res, fetch = self.run_collect(new)
-        self.assertEqual(res["status"], "incr")
-        self.assertEqual(fetch.call_count, 1)
-        delta = res["_delta"]
-        self.assertEqual(list(delta["date"].dt.strftime("%Y-%m-%d")), ["2026-11-02", "2026-11-03"])
-        self.assertEqual(delta.iloc[0]["close"], 104)
-
-    def test_halted_day_is_not_compared(self):
-        self.save([("2026-11-02", "종가")])
-        halted = fetched(["2026-11-02", "2026-11-03"], close=99)
-        halted["volume"] = 0
-        res, fetch = self.run_collect(halted)
-        self.assertEqual(res["status"], "incr")
-        self.assertEqual(fetch.call_count, 1)
-
     def test_same_day_intraday_is_refetched(self):
         self.save([("2026-11-02", "종가"), ("2026-11-03", "장중")])
-        res, fetch = self.run_collect(fetched(["2026-11-02", "2026-11-03"], close=105))
-        self.assertEqual(fetch.call_args.args[1], "2026-11-02")
+        res, fetch = self.run_collect(fetched(["2026-11-03"], close=105))
+        self.assertEqual(fetch.call_args.args[1], "2026-11-03")
         delta = res["_delta"]
         self.assertEqual(len(delta), 1)
         self.assertEqual(delta.iloc[-1]["price_status"], "종가")
 
     def test_past_intraday_rows_are_replaced_as_final(self):
         self.save([("2026-10-30", "종가"), ("2026-11-02", "장중")])
-        new = fetched(["2026-10-30", "2026-11-02", "2026-11-03"], close=105)
+        new = fetched(["2026-11-02", "2026-11-03"], close=105)
         new["price_status"] = "장중"  # 수집 시각이 장중
         res, fetch = self.run_collect(new)
-        self.assertEqual(fetch.call_args.args[1], "2026-10-30")
+        self.assertEqual(fetch.call_args.args[1], "2026-10-31")
         delta = res["_delta"].set_index(res["_delta"]["date"].dt.strftime("%Y-%m-%d"))
         self.assertEqual(list(delta.index), ["2026-11-02", "2026-11-03"])
         self.assertEqual(delta.loc["2026-11-02", "price_status"], "종가")
@@ -128,7 +100,7 @@ class CollectOneStockTests(unittest.TestCase):
 
     def test_no_new_data_keeps_file_untouched(self):
         self.save([("2026-11-02", "종가")])
-        res, _ = self.run_collect(fetched(["2026-11-02"], close=105))
+        res, _ = self.run_collect(fetched([]))
         self.assertEqual(res["status"], "empty")
         self.assertFalse(res["updated"])
 
