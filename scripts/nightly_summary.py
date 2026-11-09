@@ -24,7 +24,7 @@ STEP_LABELS = [
     ("update", "데이터 업데이트"),
     ("scan", "이평 돌파 스캔"),
     ("publish", "GitHub 묶음 업로드"),
-    ("share", "iCloud 전체 데이터"),
+    ("share", "iCloud 공유"),
 ]
 STATUS_TEXT = {"ok": "완료", "fail": "실패", "skip": "건너뜀"}
 SHORT_LABELS = {
@@ -48,9 +48,11 @@ def update_line(since: float) -> str:
         return ""
     df = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
     counts = df["status"].value_counts().to_dict()
-    failed = sum(v for k, v in counts.items() if k not in {"skip", "incr", "init"})
-    updated = counts.get("incr", 0) + counts.get("init", 0)
+    failed = sum(v for k, v in counts.items() if k not in {"skip", "empty", "incr", "init", "refresh"})
+    updated = counts.get("incr", 0) + counts.get("init", 0) + counts.get("refresh", 0)
     line = f"종목 {len(df):,}개 중 갱신 {updated:,}"
+    if counts.get("refresh"):
+        line += f" (수정주가 재수신 {counts['refresh']:,})"
     if failed:
         line += f" · 실패 {failed:,}"
     return line
@@ -68,15 +70,19 @@ def scan_lines(since: float) -> list[str]:
     return ["돌파: " + " · ".join(parts[:3]), "      " + " · ".join(parts[3:])] if len(parts) > 3 else ["돌파: " + " · ".join(parts)]
 
 
-def share_size() -> str:
+def share_detail() -> str:
     share_dir = os.getenv("KRX_SHARE_DIR") or os.path.join(
         os.path.expanduser("~"), "Library", "Mobile Documents", "com~apple~CloudDocs", "KRX_FDR"
     )
     try:
-        with open(os.path.join(share_dir, "krx_full_data.json"), encoding="utf-8") as f:
-            return f" ({json.load(f).get('size_mb')}MB)"
+        with open(os.path.join(share_dir, "krx_last_export.json"), encoding="utf-8") as f:
+            st = json.load(f)
     except (OSError, ValueError):
         return ""
+    text = f" (일일 파일 {len(st.get('daily_copied', []))}개, {st.get('daily_kb')}KB"
+    if st.get("full_rebuilt"):
+        text += f" + 전체 묶음 {st.get('full_mb')}MB"
+    return text + ")"
 
 
 def build_message(args) -> str:
@@ -97,7 +103,7 @@ def build_message(args) -> str:
     for key, label in STEP_LABELS:
         status = statuses[key]
         if key == "share" and status == "ok":
-            lines.append(f"{label}: 저장 완료{share_size()}")
+            lines.append(f"{label}: 완료{share_detail()}")
         elif status != "ok" or not all_ok:
             lines.append(f"{label}: {STATUS_TEXT.get(status, status)}")
         elif key == "publish":

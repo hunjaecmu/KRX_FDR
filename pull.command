@@ -1,5 +1,5 @@
 #!/bin/bash
-# 공유 폴더(iCloud Drive)의 전체 데이터를 이 Mac에 설치 (Windows의 pull.cmd와 같은 역할)
+# 공유 폴더(iCloud Drive)의 일일 시세 파일을 반영하고 스캔 (Windows의 pull.cmd와 같은 역할)
 cd "$(dirname "$0")" || exit 1
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8

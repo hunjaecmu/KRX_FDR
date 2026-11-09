@@ -1,8 +1,12 @@
+import io
 import json
 import os
 import re
+import shutil
+import socket
 import time
 import calendar
+import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime, timedelta
@@ -51,6 +55,9 @@ INDEX_DIR = os.path.join(DATA_DIR, "index")
 INDEX_WEEKLY_DIR = os.path.join(INDEX_DIR, "weekly")
 INDEX_MONTHLY_DIR = os.path.join(INDEX_DIR, "monthly")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
+# 일일 시세 파일: 수집 → 이 파일 → 종목 파일 반영. 다른 PC와 공유할 때도 이 파일만 보낸다.
+DAILY_CLOSE_DIR = os.path.join(DATA_DIR, "daily_close")
+DAILY_CLOSE_KEEP_DAYS = 60
 
 MASTER_FILE = os.path.join(MASTER_DIR, "kospi_tickers.csv")
 
@@ -59,16 +66,15 @@ START_YEARS_AGO = 25
 SLEEP_SEC_BETWEEN_TICKERS = 0.15
 SLEEP_SEC_BETWEEN_MASTER_CALLS = 0.02
 MAX_RETRY = 3
-# 전체 시세를 메모리에 오래 유지하지 않으면서 디스크 쓰기 횟수를 줄이는 기준.
-RAW_SAVE_BUFFER_SIZE = 50
 DERIVED_MAX_WORKERS = 4
 PROGRESS_PRINT_INTERVAL = 50
 
 MA_WINDOWS = [5, 10, 20, 120, 180, 240]
 
-# 장중/종가 판정 기준 (필요하면 조정)
-MARKET_CLOSE_HOUR = 15
-MARKET_CLOSE_MINUTE = 30
+# 장중/종가 판정 기준. 네이버 일봉은 넥스트레이드(NXT) 애프터마켓이 끝나는 20:00까지
+# 값이 바뀌므로, 그 전에 받은 당일 봉은 장중으로 보고 다음 실행 때 다시 받는다.
+MARKET_CLOSE_HOUR = 20
+MARKET_CLOSE_MINUTE = 0
 
 
 # =========================================================
@@ -408,6 +414,12 @@ def fetch_ohlcv_with_retry(
     raise last_error
 
 
+RAW_COLUMNS = [
+    "date", "open", "high", "low", "close", "volume",
+    "asof_datetime", "asof_date", "asof_time", "price_status",
+]
+
+
 def get_last_date_and_status(df: pd.DataFrame) -> tuple[Optional[str], Optional[str]]:
     """load_raw_daily 결과(날짜순 정렬, 중복 제거)의 마지막 날짜와 price_status."""
     if df.empty:
@@ -421,104 +433,6 @@ def get_last_date_and_status(df: pd.DataFrame) -> tuple[Optional[str], Optional[
 
     status = str(status).strip()
     return last_date, status if status else None
-
-
-def get_trailing_intraday_dates(df: pd.DataFrame) -> List[str]:
-    """
-    마지막 저장일에서 과거로 거슬러 올라가며 연속된 '장중' 날짜를 수집.
-    예) [..., 2026-04-08(장중), 2026-04-09(장중)] -> ["2026-04-09", "2026-04-08"]
-    """
-    targets: List[str] = []
-    for _, row in df.iloc[::-1].iterrows():
-        status = str(row.get("price_status", "")).strip()
-        if status == "장중":
-            targets.append(pd.to_datetime(row["date"]).strftime("%Y-%m-%d"))
-        else:
-            break
-
-    return targets
-
-
-def repair_trailing_intraday_to_final(
-    code: str,
-    name: str,
-    file_path: str,
-    old_df: pd.DataFrame,
-    end_date: str,
-    run_meta: Dict[str, str],
-    save: bool = True,
-) -> Dict[str, int]:
-    """
-    마지막 저장일 기준 연속된 '장중' 구간 중 과거 날짜(< end_date)에 대해
-    과거 날짜가 2일 이상이면 범위로 조회해 종가 데이터를 덮어쓴다.
-    """
-    trailing = get_trailing_intraday_dates(old_df)
-    if not trailing:
-        return {"checked": 0, "repaired": 0}
-
-    # 오늘 날짜 장중 바는 장중 업데이트 루틴에서 처리하고,
-    # 과거 날짜의 장중 표기만 종가로 보정한다.
-    historical_targets = [d for d in trailing if d < end_date]
-    if not historical_targets:
-        return {"checked": len(trailing), "repaired": 0}
-
-    final_meta = dict(run_meta)
-    final_meta["price_status"] = "종가"
-
-    target_dates = sorted(historical_targets)
-    start_date = target_dates[0]
-    end_date = target_dates[-1]
-    fetch_end_date = next_day(end_date)
-
-    try:
-        fetched_df = fetch_ohlcv_with_retry(
-            code=code,
-            start_date=start_date,
-            end_date=fetch_end_date,
-            metadata=final_meta,
-        )
-
-        if fetched_df.empty:
-            return {"checked": len(trailing), "repaired": 0}
-
-        fetched_df = fetched_df.copy()
-        fetched_df["date"] = pd.to_datetime(fetched_df["date"]).dt.normalize()
-        target_timestamps = pd.to_datetime(target_dates)
-        repaired_df = fetched_df[fetched_df["date"].isin(target_timestamps)]
-        if repaired_df.empty:
-            return {"checked": len(trailing), "repaired": 0}
-
-        if len(target_dates) == 1:
-            print(f"[RAW][REPAIR] {code} {name} {start_date} 장중 -> 종가 재조회 완료")
-        else:
-            print(
-                f"[RAW][REPAIR] {code} {name} {start_date}~{end_date} "
-                "장중 -> 종가 범위 재조회 완료"
-            )
-    except Exception as e:
-        if len(target_dates) == 1:
-            print(f"[RAW][REPAIR][WARN] {code} {name} {start_date} 재조회 실패: {e}")
-        else:
-            print(
-                f"[RAW][REPAIR][WARN] {code} {name} {start_date}~{end_date} "
-                f"범위 재조회 실패: {e}"
-            )
-        return {"checked": len(trailing), "repaired": 0}
-
-    merged = (
-        pd.concat([old_df, repaired_df], ignore_index=True)
-          .sort_values("date")
-          .drop_duplicates(subset=["date"], keep="last")
-          .reset_index(drop=True)
-    )
-    if save:
-        save_raw_daily(file_path, merged)
-
-    return {
-        "checked": len(trailing),
-        "repaired": len(repaired_df),
-        "data": merged,
-    }
 
 
 def raw_schema_needs_refresh(file_path: str) -> bool:
@@ -538,163 +452,143 @@ def save_raw_daily(file_path: str, df: pd.DataFrame) -> None:
     out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
     out.to_csv(file_path, index=False, encoding="utf-8-sig")
 
-def load_raw_daily(file_path: str) -> pd.DataFrame:
-    expected = [
-        "date", "open", "high", "low", "close", "volume",
-        "asof_datetime", "asof_date", "asof_time", "price_status",
-    ]
 
-    if not os.path.exists(file_path):
-        return pd.DataFrame(columns=expected)
-
-    df = pd.read_csv(file_path)
+def _normalize_raw(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
-        return pd.DataFrame(columns=expected)
+        return pd.DataFrame(columns=RAW_COLUMNS)
 
-    for col in expected:
+    for col in RAW_COLUMNS:
         if col not in df.columns:
             df[col] = pd.NA
 
-    df = df[expected].copy()
+    df = df[RAW_COLUMNS].copy()
     df["date"] = pd.to_datetime(df["date"]).dt.normalize()
     df = clean_numeric(df, ["open", "high", "low", "close", "volume"])
     df["volume"] = df["volume"].fillna(0)
     df = normalize_zero_volume_ohlc(df)
 
-    df = (
+    return (
         df.dropna(subset=["date"])
           .sort_values("date")
           .drop_duplicates(subset=["date"], keep="last")
           .reset_index(drop=True)
     )
-    return df
 
-def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
+
+def load_raw_daily(file_path: str) -> pd.DataFrame:
+    if not os.path.exists(file_path):
+        return pd.DataFrame(columns=RAW_COLUMNS)
+    return _normalize_raw(pd.read_csv(file_path))
+
+
+def load_raw_tail(file_path: str, rows: int = 10) -> pd.DataFrame:
+    """파일 끝의 몇 줄만 읽는다. 저장 파일은 날짜순이므로 수집 단계에는 이것으로 충분하다."""
+    if not os.path.exists(file_path):
+        return pd.DataFrame(columns=RAW_COLUMNS)
+
+    with open(file_path, "rb") as f:
+        header = f.readline()
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        block = min(size, 16384)
+        f.seek(size - block)
+        data = f.read()
+
+    # 첫 줄은 머리글이거나 중간에서 잘린 줄이다.
+    lines = [line for line in data.splitlines()[1:] if line.strip()][-rows:]
+    if not lines:
+        return pd.DataFrame(columns=RAW_COLUMNS)
+    text = header.rstrip(b"\r\n") + b"\n" + b"\n".join(lines) + b"\n"
+    return _normalize_raw(pd.read_csv(io.BytesIO(text), encoding="utf-8-sig"))
+
+
+def _finalize_past_rows(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
+    """오늘 이전 날짜의 봉은 수집 시각과 관계없이 확정된 종가다."""
+    result = df.copy()
+    past = pd.to_datetime(result["date"]) < pd.to_datetime(end_date)
+    result.loc[past, "price_status"] = "종가"
+    return result
+
+
+# 마지막 확정 봉 몇 개를 다시 받아 저장값과 비교한다.
+OVERLAP_DAYS = 5
+
+
+def _compare_overlap(saved: pd.DataFrame, fetched_df: pd.DataFrame) -> tuple[bool, pd.DataFrame]:
+    """
+    다시 받은 겹치는 봉을 저장값과 비교한다.
+    - 종가가 2일 이상 다르면 액면분할·증자 등으로 과거 가격이 수정된 것 → (True, 빈 표)
+    - 그보다 적게 다르면 그 날의 정정값만 돌려준다 → (False, 정정할 봉)
+    거래정지(거래량 0) 봉의 종가는 비교하지 않는다.
+    """
+    cols = ["open", "high", "low", "close", "volume"]
+    old = saved.assign(date=pd.to_datetime(saved["date"])).set_index("date")[cols]
+    new = fetched_df.assign(date=pd.to_datetime(fetched_df["date"]))
+    new = new[new["date"].isin(old.index)]
+    if new.empty:
+        return False, new
+    joined = new.set_index("date")[cols].join(old.add_suffix("_old"))
+    traded = (joined["volume"] > 0) & (joined["volume_old"] > 0)
+    close_changed = traded & ((joined["close"] - joined["close_old"]).abs() >= 1)
+    if int(close_changed.sum()) >= 2:
+        return True, new.iloc[0:0]
+    changed = pd.Series(False, index=joined.index)
+    for c in cols:
+        changed |= (joined[c] - joined[c + "_old"]).abs() >= 1
+    return False, new[new["date"].isin(joined.index[changed])]
+
+
+def collect_one_stock(code: str, name: str) -> Dict:
+    """
+    한 종목의 새 시세를 받아 '_delta'로 돌려준다. 종목 파일은 건드리지 않는다.
+    _delta의 mode: incr(기존 파일에 덧붙임) / full(전체 이력으로 교체)
+    """
     file_path = raw_file_path(code, name)
     end_date = today_str("%Y-%m-%d")
     run_meta = get_run_metadata()
 
-    force_full_refresh = raw_schema_needs_refresh(file_path)
-    if force_full_refresh:
-        start_date = initial_start_date()
-        mode = "REFRESH"
+    base_row = None
+    if raw_schema_needs_refresh(file_path):
+        start_date, mode = initial_start_date(), "refresh"
     else:
         try:
-            existing_df = load_raw_daily(file_path)
+            tail = load_raw_tail(file_path)
         except Exception as e:
-            return {
-                "status": "fail",
-                "message": f"실패: {e}",
-                "rows": 0,
-                "updated": False,
-                "reason": str(e),
-            }
+            return {"status": "fail", "message": f"실패: {e}", "rows": 0, "updated": False, "reason": str(e)}
 
-        repair_info = repair_trailing_intraday_to_final(
-            code=code,
-            name=name,
-            file_path=file_path,
-            old_df=existing_df,
-            end_date=end_date,
-            run_meta=run_meta,
-            save=save,
-        )
-
-        last_saved, last_price_status = get_last_date_and_status(existing_df)
+        last_saved, last_status = get_last_date_and_status(tail)
         if last_saved is None:
-            start_date = initial_start_date()
-            mode = "INIT"
+            start_date, mode = initial_start_date(), "init"
+        elif last_saved == end_date and last_status == "종가":
+            return {"status": "skip", "message": "이미 최신(종가)", "rows": 0, "updated": False}
+        elif pd.to_datetime(last_saved) > pd.to_datetime(end_date):
+            return {"status": "skip", "message": "저장 데이터 날짜가 오늘보다 미래", "rows": 0, "updated": False}
         else:
-            # Skip only when today's bar is already finalized.
-            if last_saved == end_date and last_price_status == "종가":
-                return {
-                    "status": "skip",
-                    "message": "이미 최신(종가)",
-                    "rows": 0,
-                    "updated": False,
-                }
-
-            if pd.to_datetime(last_saved) > pd.to_datetime(end_date):
-                return {
-                    "status": "skip",
-                    "message": "저장 데이터 날짜가 오늘보다 미래",
-                    "rows": 0,
-                    "updated": False,
-                }
-
-            if last_saved == end_date and last_price_status == "장중":
-                # Refetch same-day bar to refresh intraday snapshot.
-                start_date = end_date
-                mode = "INCR"
-            else:
-                start_date = next_day(last_saved)
-                mode = "INCR"
+            mode = "incr"
+            final = tail[tail["price_status"].astype(str).str.strip() != "장중"]
+            intraday = tail[tail["price_status"].astype(str).str.strip() == "장중"]
+            if not final.empty:
+                overlap = final.tail(OVERLAP_DAYS)
+                base_row = overlap.iloc[-1]
+            # 마지막 확정 봉 몇 개부터 다시 받아 수정주가 여부를 확인하고, 그 뒤의 장중 봉은 새 값으로 바꾼다.
+            start_candidates = []
+            if base_row is not None:
+                start_candidates.append(pd.to_datetime(overlap["date"]).min())
+            if not intraday.empty:
+                start_candidates.append(pd.to_datetime(intraday["date"]).min())
+            start_date = min(start_candidates).strftime("%Y-%m-%d")
 
     fetch_started = time.perf_counter()
     try:
         new_df = fetch_ohlcv_with_retry(code, start_date, end_date, metadata=run_meta)
-        fetch_sec = time.perf_counter() - fetch_started
-
-        if force_full_refresh:
-            merged = new_df.copy()
-        else:
-            repaired_df = repair_info.get("data")
-            old_df = (
-                repaired_df
-                if isinstance(repaired_df, pd.DataFrame)
-                else existing_df
-            )
-            old_has_values = not old_df.dropna(how="all").empty
-            new_has_values = not new_df.dropna(how="all").empty
-
-            if not new_has_values and old_has_values:
-                return {
-                    "status": "empty",
-                    "message": "신규 데이터 없음",
-                    "rows": 0,
-                    "updated": False,
-                    "fetch_sec": round(fetch_sec, 3),
-                }
-
-            if old_has_values and new_has_values:
-                merged = pd.concat([old_df, new_df], ignore_index=True)
-            elif new_has_values:
-                merged = new_df.copy()
-            elif old_has_values:
-                merged = old_df.copy()
-            else:
-                merged = pd.DataFrame(columns=old_df.columns)
-
-            merged = (
-                merged.sort_values("date")
-                      .drop_duplicates(subset=["date"], keep="last")
-                      .reset_index(drop=True)
-            )
-
-        if merged.empty:
-            return {
-                "status": "empty",
-                "message": "저장할 데이터 없음",
-                "rows": 0,
-                "updated": False,
-            }
-
-        if save:
-            save_raw_daily(file_path, merged)
-        added_rows = len(new_df) if not force_full_refresh else len(merged)
-
-        result = {
-            "status": mode.lower(),
-            "message": f"저장 완료 / rows={len(merged)} / added={added_rows}",
-            "rows": int(added_rows),
-            "updated": True,
-            "fetch_sec": round(fetch_sec, 3),
-        }
-        if not save:
-            result["_pending_file_path"] = file_path
-            result["_pending_data"] = merged
-        return result
-
+        corrections = new_df.iloc[0:0]
+        if mode == "incr" and base_row is not None:
+            adjusted, corrections = _compare_overlap(overlap, new_df)
+            if adjusted:
+                print(f"[RAW][ADJUST] {code} {name} 과거 종가가 여러 날 달라져 전체 이력을 다시 받습니다.")
+                mode = "refresh"
+                new_df = fetch_ohlcv_with_retry(code, initial_start_date(), end_date, metadata=run_meta)
+        fetch_sec = round(time.perf_counter() - fetch_started, 3)
     except Exception as e:
         return {
             "status": "fail",
@@ -704,6 +598,164 @@ def update_one_raw_stock(code: str, name: str, save: bool = True) -> Dict:
             "reason": str(e),
             "fetch_sec": round(time.perf_counter() - fetch_started, 3),
         }
+
+    new_df = new_df.dropna(how="all", subset=["open", "high", "low", "close"])
+    if mode == "incr" and base_row is not None:
+        # 이미 확정 저장된 봉은 값이 정정된 날만 다시 쓴다.
+        later = new_df[pd.to_datetime(new_df["date"]) > pd.to_datetime(base_row["date"])]
+        new_df = pd.concat([corrections, later], ignore_index=True)
+    if new_df.empty:
+        return {"status": "empty", "message": "신규 데이터 없음", "rows": 0, "updated": False, "fetch_sec": fetch_sec}
+
+    delta = _finalize_past_rows(new_df, end_date)
+    delta.insert(0, "mode", "incr" if mode == "incr" else "full")
+    delta.insert(0, "name", name)
+    delta.insert(0, "code", code)
+    return {
+        "status": mode,
+        "message": f"수집 완료 / added={len(delta)}",
+        "rows": int(len(delta)),
+        "updated": True,
+        "fetch_sec": fetch_sec,
+        "_delta": delta,
+    }
+
+
+# =========================================================
+# 일일 시세 파일 (daily_close)
+#   수집한 새 시세를 먼저 이 파일 하나에 모은 뒤, 다 모이면 종목 파일에 반영한다.
+#   다른 PC는 이 파일만 받아 같은 방식으로 반영한다 (scripts/share_full_data.py).
+# =========================================================
+DELTA_ROWS = "rows.csv"
+DELTA_MANIFEST = "manifest.json"
+
+
+def list_daily_close(folder: str = None) -> List[str]:
+    folder = folder or DAILY_CLOSE_DIR
+    if not os.path.isdir(folder):
+        return []
+    return sorted(
+        os.path.join(folder, f) for f in os.listdir(folder)
+        if re.fullmatch(r"\d{8}_\d{6}\.zip", f)
+    )
+
+
+def read_daily_close_manifest(path: str) -> Dict:
+    with zipfile.ZipFile(path) as z:
+        return json.loads(z.read(DELTA_MANIFEST).decode("utf-8"))
+
+
+def write_daily_close(delta_df: pd.DataFrame, failed: List[str], folder: str = None) -> str:
+    """
+    일일 시세 파일을 만든다: 새 시세(rows.csv), 종목 목록, 시장 지수, manifest.
+    prev에는 바로 앞 파일 이름을 적어, 받는 쪽이 빠진 날이 없는지 확인할 수 있게 한다.
+    """
+    folder = folder or DAILY_CLOSE_DIR
+    os.makedirs(folder, exist_ok=True)
+    existing = list_daily_close(folder)
+    delta_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    prev = os.path.splitext(os.path.basename(existing[-1]))[0] if existing else None
+    if prev and prev >= delta_id:
+        delta_id = (datetime.strptime(prev, "%Y%m%d_%H%M%S") + timedelta(seconds=1)).strftime("%Y%m%d_%H%M%S")
+
+    out = delta_df.copy()
+    out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
+    modes = out.drop_duplicates("code")["mode"].value_counts().to_dict()
+    manifest = {
+        "id": delta_id,
+        "prev": prev,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "host": socket.gethostname(),
+        "trade_date": out["date"].max() if not out.empty else None,
+        "stocks": int(out["code"].nunique()),
+        "rows": int(len(out)),
+        "incr_stocks": int(modes.get("incr", 0)),
+        "full_stocks": int(modes.get("full", 0)),
+        "failed": sorted(failed),
+    }
+
+    target = os.path.join(folder, f"{delta_id}.zip")
+    temp = target + ".tmp"
+    with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(DELTA_ROWS, out.to_csv(index=False))
+        if os.path.exists(MASTER_FILE):
+            z.write(MASTER_FILE, "master/" + os.path.basename(MASTER_FILE))
+        if os.path.isdir(INDEX_DIR):
+            for root, _, files in os.walk(INDEX_DIR):
+                for f in sorted(files):
+                    path = os.path.join(root, f)
+                    z.write(path, "index/" + os.path.relpath(path, INDEX_DIR).replace(os.sep, "/"))
+        z.writestr(DELTA_MANIFEST, json.dumps(manifest, ensure_ascii=False, indent=2))
+    os.replace(temp, target)
+    return target
+
+
+def prune_daily_close(folder: str = None, keep_days: int = None) -> None:
+    keep_days = DAILY_CLOSE_KEEP_DAYS if keep_days is None else keep_days
+    cutoff = (today() - timedelta(days=keep_days)).strftime("%Y%m%d")
+    for path in list_daily_close(folder):
+        if os.path.basename(path)[:8] < cutoff:
+            os.remove(path)
+
+
+def read_daily_close_rows(path: str) -> pd.DataFrame:
+    with zipfile.ZipFile(path) as z:
+        with z.open(DELTA_ROWS) as f:
+            return pd.read_csv(f, dtype={"code": str})
+
+
+def apply_daily_rows(rows: pd.DataFrame) -> Dict[str, Dict]:
+    """일일 시세 파일의 행을 종목 파일에 반영한다. 같은 날짜는 새 값으로 바꾼다."""
+    results: Dict[str, Dict] = {}
+    if rows.empty:
+        return results
+    rows = rows.copy()
+    rows["code"] = rows["code"].astype(str).str.zfill(6)
+    for (code, name), group in rows.groupby(["code", "name"], sort=False):
+        path = raw_file_path(code, name)
+        mode = group["mode"].iloc[0]
+        new_df = _normalize_raw(group.drop(columns=["code", "name", "mode"]))
+        try:
+            if mode == "full":
+                merged = new_df
+            else:
+                if not os.path.exists(path):
+                    results[code] = {"status": "missing_base", "name": name}
+                    print(f"[APPLY][WARN] {code} {name}: 기존 파일이 없어 반영하지 못했습니다.")
+                    continue
+                merged = (
+                    pd.concat([load_raw_daily(path), new_df], ignore_index=True)
+                      .sort_values("date")
+                      .drop_duplicates(subset=["date"], keep="last")
+                      .reset_index(drop=True)
+                )
+            save_raw_daily(path, merged)
+            results[code] = {"status": "ok", "name": name, "rows": len(merged)}
+        except Exception as e:
+            print(f"[APPLY][FAIL] {code} {name}: {e}")
+            results[code] = {"status": "fail", "name": name, "reason": str(e)}
+    return results
+
+
+def install_daily_close_extras(path: str) -> None:
+    """일일 시세 파일에 담긴 종목 목록과 시장 지수 파일을 설치한다 (다른 PC용)."""
+    ensure_dirs()
+    with zipfile.ZipFile(path) as z:
+        for info in z.infolist():
+            name = info.filename
+            if name.startswith("/") or ".." in name.split("/") or ":" in name:
+                raise ValueError(f"잘못된 경로가 묶음에 있습니다: {name}")
+            if name.startswith("master/"):
+                dest = os.path.join(MASTER_DIR, name[len("master/"):])
+            elif name.startswith("index/"):
+                dest = os.path.join(INDEX_DIR, *name[len("index/"):].split("/"))
+            else:
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with z.open(info) as src, open(dest + ".tmp", "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            os.replace(dest + ".tmp", dest)
+
 
 # =========================================================
 # 파생 데이터(일/주/월)
@@ -989,59 +1041,68 @@ def run_all(
     master_df = master_df[master_df["market"].map(market_group).isin(selected)].reset_index(drop=True)
     master_sec = time.perf_counter() - run_started
 
-    raw_results = []
+    raw_results: Dict[str, Dict] = {}
     derived_results = []
-
     total = len(master_df)
-    updated_codes = set()
-    pending_raw_saves: List[tuple[str, pd.DataFrame]] = []
+    tickers = [(str(r.code).zfill(6), str(r.name).strip()) for r in master_df.itertuples(index=False)]
 
-    def flush_raw_saves() -> None:
-        for file_path, df in pending_raw_saves:
-            save_raw_daily(file_path, df)
-        pending_raw_saves.clear()
-
+    # 1) 수집: 새 시세를 메모리에 모은다. 종목 파일은 아직 건드리지 않는다.
     raw_started = time.perf_counter()
-    for i, row in enumerate(master_df.itertuples(index=False), start=1):
-        code = str(row.code).zfill(6)
-        name = str(row.name).strip()
+    deltas: List[pd.DataFrame] = []
 
-        res = update_one_raw_stock(code, name, save=False)
-        if res.get("updated"):
-            pending_raw_saves.append(
-                (res["_pending_file_path"], res["_pending_data"])
-            )
-            res.pop("_pending_file_path")
-            res.pop("_pending_data")
-            if len(pending_raw_saves) >= RAW_SAVE_BUFFER_SIZE:
-                flush_raw_saves()
-
-        if i % 50 == 0 or i == total:
-            print(f"[RAW {i}/{total}] 진행중")
+    def collect(code: str, name: str) -> Dict:
+        res = collect_one_stock(code, name)
+        delta = res.pop("_delta", None)
+        if delta is not None:
+            deltas.append(delta)
         res["code"] = code
         res["name"] = name
-        raw_results.append(res)
+        raw_results[code] = res
+        if "fetch_sec" in res:  # 서버에 요청한 종목만 간격을 둔다.
+            time.sleep(SLEEP_SEC_BETWEEN_TICKERS)
+        return res
 
-        if res.get("updated"):
-            updated_codes.add(code)
+    for i, (code, name) in enumerate(tickers, start=1):
+        collect(code, name)
+        if i % 50 == 0 or i == total:
+            print(f"[RAW {i}/{total}] 진행중")
 
-        time.sleep(SLEEP_SEC_BETWEEN_TICKERS)
+    failed = [(c, r["name"]) for c, r in raw_results.items() if r["status"] == "fail"]
+    if failed:
+        print(f"[RAW] 실패 {len(failed)}종목 다시 시도")
+        time.sleep(5)
+        for code, name in failed:
+            collect(code, name)
+    failed_codes = [c for c, r in raw_results.items() if r["status"] == "fail"]
 
-    flush_raw_saves()
-    raw_result_df = pd.DataFrame(raw_results)
+    # 2) 일일 시세 파일: 시장 지수까지 받은 뒤 한 파일로 저장한다.
+    if set(selected) == {"KOSPI", "KOSDAQ", "ETF"}:
+        update_indices()
+    delta_df = pd.concat(deltas, ignore_index=True) if deltas else pd.DataFrame()
+    if not delta_df.empty:
+        delta_path = write_daily_close(delta_df, failed_codes)
+        prune_daily_close()
+        print(f"[DAILY] 일일 시세 파일 저장: {delta_path} ({len(delta_df):,}행, {delta_df['code'].nunique():,}종목)")
+    else:
+        print("[DAILY] 새 시세가 없어 일일 시세 파일을 만들지 않습니다.")
+    if failed_codes:
+        print(f"[DAILY][WARN] 받지 못한 종목 {len(failed_codes)}개는 반영하지 않습니다: {', '.join(failed_codes[:20])}")
+
+    # 3) 반영: 일일 시세 파일의 내용을 종목 파일에 반영한다.
+    applied = apply_daily_rows(delta_df)
+    for code, res in applied.items():
+        if res["status"] != "ok":
+            raw_results[code]["status"] = "fail"
+            raw_results[code]["message"] = f"반영 실패: {res.get('reason', res['status'])}"
+    updated_codes = {c for c, res in applied.items() if res["status"] == "ok"}
+    raw_result_df = pd.DataFrame([raw_results[c] for c, _ in tickers])
     raw_sec = time.perf_counter() - raw_started
 
     derived_started = time.perf_counter()
-    derive_tasks = [
-        (str(row.code).zfill(6), str(row.name).strip())
-        for row in master_df.itertuples(index=False)
-        if derive_all or str(row.code).zfill(6) in updated_codes
-    ]
+    derive_tasks = [(c, n) for c, n in tickers if derive_all or c in updated_codes]
     derived_by_code = generate_derived_all(derive_tasks, total=len(derive_tasks))
 
-    for row in master_df.itertuples(index=False):
-        code = str(row.code).zfill(6)
-        name = str(row.name).strip()
+    for code, name in tickers:
         res = derived_by_code.get(code, {"status": "skip_not_updated"})
         res["code"] = code
         res["name"] = name
@@ -1049,9 +1110,6 @@ def run_all(
 
     derived_result_df = pd.DataFrame(derived_results)
     derived_sec = time.perf_counter() - derived_started
-
-    if set(selected) == {"KOSPI", "KOSDAQ", "ETF"}:
-        update_indices()
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_log_file = os.path.join(LOG_DIR, f"raw_update_result_{ts}.csv")
