@@ -1,13 +1,12 @@
-"""Local HTML adapter for this project's data_loader/data_store CSV layout.
+"""Local HTML portfolio that fetches its own prices with FinanceDataReader.
 
-Existing master/raw/derived files are read only. Generated files live alongside
-the HTML in portfolio_dashboard_data/. No third party dependency is needed to
-export; optional online refresh uses the project's installed FinanceDataReader.
+It does not read the KRX_FDR scan data. The stock list comes from FDR listings
+(refreshed once a day) and daily prices are fetched only for held codes.
+Generated files live alongside the HTML in portfolio_dashboard_data/.
 """
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import os
@@ -33,18 +32,16 @@ CODE = re.compile(r"[0-9A-Za-z]{6}\Z")
 BUILD_LOCK = threading.Lock()
 JOB_LOCK = threading.Lock()
 UPDATE_JOB = {"state": "idle", "done": 0, "total": 0}
+# 보유 종목을 처음 받을 때의 시작일. 이후에는 마지막 날짜 근처부터 이어 받는다.
+PRICE_START = "2014-01-01"
+REFETCH_DAYS = 10
+FETCH_TIMEOUT = 50
+FETCH_TIMEOUT_PER_CODE = 10
 INSTANCE_ID = hashlib.sha256(str(ROOT.resolve()).encode("utf-8")).hexdigest()[:16]
 
 
 def now_text():
     return datetime.now(KST).isoformat(timespec="seconds")
-
-
-def data_directory(root=ROOT):
-    # Matches config.py's APP_DATA_DIR / DATA_DIR settings without importing its
-    # directory-creation side effects during read-only HTML generation.
-    app_dir = Path(os.environ.get("APP_DATA_DIR", str(root / ".app_data")))
-    return Path(os.environ.get("DATA_DIR", str(app_dir / "data")))
 
 
 def dumps(value):
@@ -72,49 +69,117 @@ def numeric(value):
     return None
 
 
-def load_symbols(data_dir):
-    path = data_dir / "master" / "kospi_tickers.csv"
-    if not path.is_file():
-        raise FileNotFoundError(f"종목 마스터가 없습니다: {path}. 기존 scripts/update_data.py를 먼저 실행하세요.")
-    symbols = {}
-    with path.open(encoding="utf-8-sig", newline="") as stream:
-        for row in csv.DictReader(stream):
-            code = str(row.get("code", "")).strip().zfill(6)
-            market = str(row.get("market", "")).strip().upper()
-            if CODE.fullmatch(code) and (market in {"KOSPI", "ETF/KR", "ETF"} or market.startswith("KOSDAQ")):
-                symbols[code] = {"code": code, "name": row.get("name", code),
-                                 "market": "ETF" if market in {"ETF/KR", "ETF"} else "KOSDAQ" if market.startswith("KOSDAQ") else market,
-                                 "market_detail": market, "currency": "KRW",
-                                 "instrument_type": "ETF" if market in {"ETF/KR", "ETF"} else "stock"}
-    if not symbols:
-        raise ValueError("KOSPI/KOSDAQ/ETF 종목 마스터가 비어 있습니다.")
-    return sorted(symbols.values(), key=lambda row: row["code"])
+def symbol_row(code, name, market):
+    market = str(market).strip().upper()
+    is_etf = market in {"ETF/KR", "ETF"}
+    return {"code": code, "name": name or code,
+            "market": "ETF" if is_etf else "KOSDAQ" if market.startswith("KOSDAQ") else market,
+            "market_detail": market, "currency": "KRW",
+            "instrument_type": "ETF" if is_etf else "stock"}
 
 
-def read_prices(path):
-    rows = {}
-    with path.open(encoding="utf-8-sig", newline="") as stream:
-        for row in csv.DictReader(stream):
-            day = str(row.get("date", ""))[:10]
-            try:
-                date.fromisoformat(day)
-            except ValueError:
-                continue
-            close = numeric(row.get("close"))
-            if close is None or close <= 0:
-                continue
-            rows[day] = ([day, close, numeric(row.get("volume"))],
-                         {"source_asof": row.get("asof_datetime") or None,
-                          "source_status": row.get("price_status") or "미확인"})
+def run_child(*args, timeout=FETCH_TIMEOUT):
+    """FDR 조회는 멈출 수 있어 별도 프로세스에서 시간 제한을 두고 실행한다."""
+    completed = subprocess.run([sys.executable, "-B", str(ROOT / "portfolio_dashboard.py"), *args],
+                               cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=timeout)
+    if completed.returncode:
+        raise RuntimeError("FDR 온라인 조회 실패. " + completed.stderr[-220:])
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def fetch_listing_child():
+    import FinanceDataReader as fdr
+    rows = []
+    for row in fdr.StockListing("KRX").itertuples():
+        market = str(row.Market).strip().upper()
+        if market == "KOSPI" or market.startswith("KOSDAQ"):
+            rows.append([str(row.Code).strip(), str(row.Name).strip(), market])
+    for row in fdr.StockListing("ETF/KR").itertuples():
+        rows.append([str(row.Symbol).strip(), str(row.Name).strip(), "ETF/KR"])
+    rows = [row for row in rows if CODE.fullmatch(row[0])]
     if not rows:
-        raise ValueError("유효한 가격이 없습니다.")
-    ordered = sorted(rows)
-    points = [rows[day][0] for day in ordered]
-    metadata = rows[ordered[-1]][1]
-    metadata.update({"first_date": ordered[0], "last_date": ordered[-1], "rows": len(points),
-                     "price_basis": "기존 FDR 저장 가격 · 조정 기준 미확인",
-                     "zero_volume_note": "기존 data_store의 거래량 0 봉 보정이 포함될 수 있음"})
-    return points, metadata
+        raise ValueError("종목 목록이 비어 있습니다.")
+    print(dumps({"rows": rows}), flush=True)
+
+
+def load_symbols(target):
+    """FDR 종목 목록을 하루 한 번 받는다. 실패하면 지난번 목록을 쓴다."""
+    path = target / "symbols.json"
+    cached = {}
+    if path.is_file():
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            cached = {}
+    issue = None
+    if cached.get("fetched_on") != date.today().isoformat():
+        try:
+            cached = {"fetched_on": date.today().isoformat(), "rows": run_child("--fetch-listing")["rows"]}
+            atomic_text(path, dumps(cached))
+        except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            issue = {"code": "LISTING", "error": "종목 목록 갱신 실패, 지난 목록 사용: " + str(exc)[-200:]}
+    symbols = {code: symbol_row(code, name, market) for code, name, market in cached.get("rows", [])}
+    return symbols, issue
+
+
+def holding_codes():
+    try:
+        doc = read_portfolio_file()["document"]
+    except (ValueError, OSError):
+        return {}
+    codes = {}
+    for holding in (doc or {}).get("holdings", []):
+        code = str(holding.get("code", "")).upper()
+        if holding.get("currency") == "KRW" and CODE.fullmatch(code):
+            codes.setdefault(code, holding.get("name") or code)
+    return codes
+
+
+def price_cache_path(target, code):
+    return target / "prices" / f"{code}.json"
+
+
+def read_price_cache(target, code):
+    path = price_cache_path(target, code)
+    if not path.is_file():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["points"]
+    except (ValueError, OSError, KeyError):
+        return []
+
+
+def price_metadata(points):
+    last = points[-1][0]
+    # 장 마감(15:30) 전에 받은 오늘 가격은 장중 값이다.
+    now = datetime.now(KST)
+    status = "장중" if last == now.date().isoformat() and now.strftime("%H:%M") < "15:40" else "종가"
+    return {"first_date": points[0][0], "last_date": last, "rows": len(points),
+            "source": "FinanceDataReader 온라인 조회", "source_asof": now_text(), "source_status": status,
+            "price_basis": "FDR 조회 가격"}
+
+
+def update_prices(target, codes):
+    """종목들의 일별 가격을 이어 받아 저장한다. ({코드: (points, metadata)}, {코드: 오류})를 돌려준다."""
+    cached = {code: read_price_cache(target, code) for code in codes}
+    requests = []
+    for code, points in cached.items():
+        start = PRICE_START
+        if points:
+            start = (date.fromisoformat(points[-1][0]) - timedelta(days=REFETCH_DAYS)).isoformat()
+        requests.append(f"{code}:{start}")
+    # 프로세스를 띄우는 비용이 커서 한 번에 받는다.
+    fetched = run_child("--fetch-child", ",".join(requests),
+                        timeout=FETCH_TIMEOUT + FETCH_TIMEOUT_PER_CODE * len(requests))
+    updated = {}
+    for code, rows in fetched["points"].items():
+        merged = {row[0]: row for row in cached.get(code, [])}
+        merged.update({row[0]: row for row in rows})
+        points = [merged[day] for day in sorted(merged)]
+        atomic_text(price_cache_path(target, code), dumps({"code": code, "points": points}))
+        updated[code] = (points, price_metadata(points))
+    return updated, fetched["errors"]
 
 
 def write_history(path, code, points, metadata):
@@ -133,8 +198,7 @@ def summary(symbol, points, metadata):
     return result
 
 
-def export_dashboard(data_dir=None, output_dir=ROOT, progress=None):
-    data_dir = Path(data_dir) if data_dir else data_directory()
+def export_dashboard(output_dir=ROOT, progress=None):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     if output_dir.resolve() != ROOT.resolve():
@@ -143,63 +207,43 @@ def export_dashboard(data_dir=None, output_dir=ROOT, progress=None):
         atomic_text(output_dir / "portfolio_asset_management.js", (ROOT / "portfolio_asset_management.js").read_text(encoding="utf-8"))
     target = output_dir / "portfolio_dashboard_data"
     history_dir = target / "history"
-    symbols = load_symbols(data_dir)
-    files = {}
-    for candidate in sorted((data_dir / "raw" / "daily").glob("*.csv")):
-        code = candidate.name.split("_", 1)[0]
-        files.setdefault(code, []).append(candidate)
-    manifest_path = target / "manifest.json"
-    old_manifest = {}
-    if manifest_path.is_file():
-        try:
-            old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            pass
-    manifest, result, issues = {}, [], []
-    for index, symbol in enumerate(symbols):
-        if progress:
-            progress(index, len(symbols))
-        code = symbol["code"]
-        candidates = files.get(code, [])
-        safe_name = re.sub(r'[\\/:*?"<>|]', '_', symbol['name'])
-        safe_name = re.sub(r'\s+', ' ', safe_name).strip()
-        expected = f"{code}_{safe_name}.csv"
-        matched = [file for file in candidates if file.name == expected]
-        # A renamed ticker may have old and new CSVs. Prefer the exact current
-        # master name; otherwise accept a unique file, never arbitrary ordering.
-        source = matched[0] if len(matched) == 1 else candidates[0] if len(candidates) == 1 else None
-        if source is None:
-            result.append({**symbol, "price": None, "date": None})
-            issues.append({"code": code, "error": "CSV 없음 또는 동일 종목 CSV 중복"})
-            continue
-        stat = source.stat()
-        signature = [str(source.resolve()), stat.st_size, stat.st_mtime_ns]
-        cached = old_manifest.get(code, {})
-        history_path = history_dir / f"{code}.js"
-        if cached.get("signature") == signature and history_path.is_file():
-            item = {**cached["summary"], **symbol}
+    symbols, listing_issue = load_symbols(target)
+    issues = [listing_issue] if listing_issue else []
+    holdings = holding_codes()
+    for code, name in holdings.items():
+        symbols.setdefault(code, symbol_row(code, name, "ETF" if not code.isdigit() else "미확인"))
+    # 보유 종목만 온라인으로 받고, 나머지는 이전에 받아 둔 가격이 있으면 그대로 보여준다.
+    if progress:
+        progress(0, len(holdings))
+    try:
+        updated, errors = update_prices(target, sorted(holdings)) if holdings else ({}, {})
+    except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        updated, errors = {}, {code: str(exc)[-200:] for code in holdings}
+    for code, (points, metadata) in updated.items():
+        write_history(history_dir / f"{code}.js", code, points, metadata)
+    # KRX_FDR CSV로 만들던 예전 차트 파일은 받아 둔 가격이 없으면 지운다.
+    (target / "manifest.json").unlink(missing_ok=True)
+    for stale in history_dir.glob("*.js"):
+        if not price_cache_path(target, stale.stem).is_file():
+            stale.unlink()
+    issues += [{"code": code, "error": "가격 갱신 실패, 지난 가격 유지: " + error} for code, error in errors.items()]
+    result = []
+    for code in sorted(symbols):
+        points = read_price_cache(target, code)
+        if points:
+            result.append(summary(symbols[code], points, price_metadata(points)))
         else:
-            try:
-                points, metadata = read_prices(source)
-                item = summary(symbol, points, metadata)
-                metadata["source"] = "기존 프로젝트 raw/daily CSV (FinanceDataReader)"
-                write_history(history_path, code, points, metadata)
-            except (ValueError, OSError, csv.Error) as exc:
-                result.append({**symbol, "price": None, "date": None})
-                issues.append({"code": code, "error": str(exc)})
-                continue
-        manifest[code] = {"signature": signature, "summary": item}
-        result.append(item)
+            result.append({**symbols[code], "price": None, "date": None})
     payload = {"version": 1, "generated_at": now_text(), "symbols": result,
                "counts": dict(Counter(row["market"] for row in result)),
                "cached_count": sum(row.get("price") is not None for row in result),
-               "issues": issues, "notice": "저장 시세이며 실시간 가격을 보장하지 않습니다."}
-    atomic_text(manifest_path, dumps(manifest))
+               "holding_count": len(holdings),
+               "issues": issues, "notice": "보유 종목만 FinanceDataReader로 갱신하며 실시간 가격을 보장하지 않습니다."}
     atomic_text(target / "market.json", dumps(payload))
     template = (ROOT / "portfolio_dashboard.template.html").read_text(encoding="utf-8")
     atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace('/*__KRX_LAUNCHER_NAME__*/"portfolio_dashboard_start.cmd"', script_json(LAUNCHER_NAME)).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
     if progress:
-        progress(len(symbols), len(symbols))
+        progress(len(holdings), len(holdings))
     print(dumps({"html": str(output_dir / "portfolio_dashboard.html"), "symbols": len(result),
                  "cached": payload["cached_count"], "issues": len(issues)}), flush=True)
     return payload
@@ -218,16 +262,25 @@ def render_existing(output_dir=ROOT):
     return payload
 
 
-def fetch_child(code, start):
+def fetch_child(requests):
+    """"코드:시작일"을 쉼표로 이은 요청을 받아 종목별 가격과 오류를 JSON으로 출력한다."""
     import FinanceDataReader as fdr
-    # Reuse normalization from the user's project; do not run its batch updater.
-    from data_store import clean_fdr_ohlcv
-    frame = clean_fdr_ohlcv(fdr.DataReader(code, start, datetime.now(KST).date().isoformat()))
-    points = [[row.date.strftime("%Y-%m-%d"), numeric(row.close), numeric(row.volume)]
-              for row in frame.itertuples() if numeric(row.close) is not None and row.close > 0]
-    if not points:
-        raise ValueError("온라인 조회에서 유효한 가격을 받지 못했습니다.")
-    print(dumps({"points": points}), flush=True)
+    today = datetime.now(KST).date().isoformat()
+    result, errors = {}, {}
+    for request in requests.split(","):
+        code, _, start = request.partition(":")
+        try:
+            if not CODE.fullmatch(code):
+                raise ValueError("잘못된 코드")
+            frame = fdr.DataReader(code, start or PRICE_START, today)
+            points = [[day.strftime("%Y-%m-%d"), numeric(row["Close"]), numeric(row.get("Volume"))]
+                      for day, row in frame.iterrows() if numeric(row["Close"]) is not None and row["Close"] > 0]
+            if not points:
+                raise ValueError("온라인 조회에서 유효한 가격을 받지 못했습니다.")
+            result[code] = points
+        except Exception as exc:
+            errors[code] = str(exc)[:200]
+    print(dumps({"points": result, "errors": errors}), flush=True)
 
 
 def refresh_symbol(code, output_dir=ROOT):
@@ -236,27 +289,15 @@ def refresh_symbol(code, output_dir=ROOT):
     symbol = next((item for item in payload["symbols"] if item["code"] == code), None)
     if symbol is None or not CODE.fullmatch(code):
         raise ValueError("종목 마스터에서 확인할 수 없는 코드입니다.")
-    start = symbol.get("meta", {}).get("first_date") or (date.today() - timedelta(days=365 * 3)).isoformat()
-    completed = subprocess.run([sys.executable, "-B", str(ROOT / "portfolio_dashboard.py"),
-                                "--fetch-child", code, "--start", start],
-                               cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=50)
-    if completed.returncode:
-        raise RuntimeError("FDR 온라인 조회 실패. 기존 저장 시세를 유지합니다. " + completed.stderr[-220:])
-    points = json.loads(completed.stdout.strip().splitlines()[-1])["points"]
-    metadata = {"first_date": points[0][0], "last_date": points[-1][0], "rows": len(points),
-                "source": "FinanceDataReader 온라인 조회 (기존 clean_fdr_ohlcv 적용)",
-                "source_asof": now_text(), "source_status": "장중/확정 종가 여부 미검증",
-                "price_basis": "FDR 조회 가격 · 조정 기준 미확인"}
+    updated, errors = update_prices(target, [code])
+    if code not in updated:
+        raise RuntimeError("FDR 온라인 조회 실패. 기존 저장 시세를 유지합니다. " + errors.get(code, ""))
+    points, metadata = updated[code]
     updated = summary(symbol, points, metadata)
     write_history(target / "history" / f"{code}.js", code, points, metadata)
     payload["symbols"] = [updated if item["code"] == code else item for item in payload["symbols"]]
     payload["generated_at"] = now_text()
     payload["cached_count"] = sum(item.get("price") is not None for item in payload["symbols"])
-    # Invalidate the export cache for this symbol so later CSV export is explicit.
-    manifest_path = target / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest.pop(code, None)
-    atomic_text(manifest_path, dumps(manifest))
     atomic_text(target / "market.json", dumps(payload))
     template = (ROOT / "portfolio_dashboard.template.html").read_text(encoding="utf-8")
     atomic_text(output_dir / "portfolio_dashboard.html", template.replace("/*__KRX_DATA__*/null", script_json(payload)).replace("/*__KRX_LAUNCHER__*/null", script_json(launcher_text())).replace('/*__KRX_LAUNCHER_NAME__*/"portfolio_dashboard_start.cmd"', script_json(LAUNCHER_NAME)).replace("/*__PERSONAL_STORAGE_CONFIG__*/null", script_json(personal_storage.public_config(ROOT))).replace("/*__PORTFOLIO_STORAGE__*/", (ROOT / "portfolio_storage.js").read_text(encoding="utf-8").replace("</script", "<\\/script")))
@@ -683,8 +724,7 @@ def serve(port):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="KRX CSV를 연결한 로컬 HTML 포트폴리오")
-    parser.add_argument("--data-dir", type=Path)
+    parser = argparse.ArgumentParser(description="FinanceDataReader로 보유 종목 시세를 받는 로컬 HTML 포트폴리오")
     parser.add_argument("--output-dir", type=Path, default=ROOT)
     parser.add_argument("--render-only", action="store_true", help="기존 market.json으로 화면만 재생성")
     parser.add_argument("--serve", action="store_true", help="HTML 생성 후 로컬 서버 실행")
@@ -693,12 +733,13 @@ def main():
     parser.add_argument("--open-portfolio", action="store_true", help="개인 저장 화면 열기")
     parser.add_argument("--no-browser", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--fetch-child", help=argparse.SUPPRESS)
-    parser.add_argument("--start", default="2023-01-01", help=argparse.SUPPRESS)
+    parser.add_argument("--fetch-listing", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.fetch_child:
-        if not CODE.fullmatch(args.fetch_child):
-            parser.error("잘못된 코드")
-        fetch_child(args.fetch_child, args.start)
+        fetch_child(args.fetch_child)
+        return
+    if args.fetch_listing:
+        fetch_listing_child()
         return
     if args.launch:
         print(dumps(launch_dashboard(args.port, not args.no_browser, args.open_portfolio)), flush=True)
@@ -709,7 +750,7 @@ def main():
     if args.render_only:
         render_existing(args.output_dir)
     else:
-        export_dashboard(args.data_dir, args.output_dir)
+        export_dashboard(args.output_dir)
     if args.serve:
         serve(args.port)
 

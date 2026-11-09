@@ -36,3 +36,4 @@ build/
 *.log
 
 /portfolio_dashboard_start.command
+/.app_data/backup/
