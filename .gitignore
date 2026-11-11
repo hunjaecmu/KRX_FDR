@@ -37,3 +37,4 @@ build/
 
 /portfolio_dashboard_start.command
 /.app_data/backup/
+/.app_data/data/shared_import.json

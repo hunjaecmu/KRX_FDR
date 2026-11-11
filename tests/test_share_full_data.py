@@ -37,6 +37,20 @@ class PendingAfterTests(unittest.TestCase):
         self.assertIsNone(share._pending_after(chain(("a1", None)), None))
 
 
+class FindBundleTests(unittest.TestCase):
+    def test_prefers_exact_name_then_newest_icloud_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(share.find_bundle(d))
+            old, new = os.path.join(d, "krx_full_data(1).zip"), os.path.join(d, "krx_full_data(2).zip")
+            for path, mtime in ((old, 1000), (new, 2000)):
+                open(path, "wb").close()
+                os.utime(path, (mtime, mtime))
+            self.assertEqual(share.find_bundle(d), new)
+            exact = os.path.join(d, "krx_full_data.zip")
+            open(exact, "wb").close()
+            self.assertEqual(share.find_bundle(d), exact)
+
+
 class ShareRoundTripTests(unittest.TestCase):
     """Mac에서 만든 일일 시세 파일을 다른 PC의 데이터 폴더에 반영한다."""
 

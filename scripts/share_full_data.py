@@ -126,11 +126,23 @@ def _safe_members(bundle: zipfile.ZipFile):
         yield info
 
 
+def find_bundle(share_dir: str):
+    """전체 묶음 경로. iCloud for Windows가 충돌로 'krx_full_data(1).zip'처럼 이름을 바꿔 두는 경우도 찾는다."""
+    exact = os.path.join(share_dir, BUNDLE_NAME)
+    if os.path.exists(exact):
+        return exact
+    stem = os.path.splitext(BUNDLE_NAME)[0]
+    variants = [os.path.join(share_dir, n) for n in os.listdir(share_dir)
+                if n.startswith(stem) and n.endswith(".zip") and not n.endswith(".partial")] if os.path.isdir(share_dir) else []
+    # 가장 최근에 받은 파일이 manifest와 맞는 최신 묶음이다.
+    return max(variants, key=os.path.getmtime) if variants else None
+
+
 def import_bundle(share_dir: str) -> dict:
     """전체 묶음을 설치한다. 실패하면 기존 데이터를 그대로 둔다."""
-    source = os.path.join(share_dir, BUNDLE_NAME)
-    if not os.path.exists(source):
-        raise SystemExit(f"공유 묶음이 없습니다: {source}")
+    source = find_bundle(share_dir)
+    if not source:
+        raise SystemExit(f"공유 묶음이 없습니다: {os.path.join(share_dir, BUNDLE_NAME)}")
 
     with zipfile.ZipFile(source) as bundle:
         manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))

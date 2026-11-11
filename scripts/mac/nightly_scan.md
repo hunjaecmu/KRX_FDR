@@ -1,6 +1,6 @@
 # 저녁 자동 스캔 (macOS)
 
-Mac이 평일 저녁마다 데이터 업데이트와 스캔을 하고, 결과를 GitHub와 iCloud Drive에 올린 뒤 텔레그램으로 알립니다. Windows PC는 시세를 받지 않고 `pull.cmd`로 Mac의 일일 시세 파일을 받아 반영한 뒤 스캔합니다.
+Mac이 평일 저녁마다 데이터 업데이트와 스캔을 하고, 결과를 GitHub와 iCloud Drive에 올린 뒤 텔레그램으로 알립니다. Windows PC는 시세를 받지 않고 `pull.cmd`로 Mac의 일일 시세 파일을 받아 반영한 뒤 스캔하고, 결과는 PC에만 저장합니다 (GitHub에 올리지 않음).
 
 ```text
 [Mac] 월~금 20:30 launchd → scripts/mac/nightly_scan.sh
@@ -63,3 +63,5 @@ launchctl kickstart gui/$(id -u)/com.krxfdr.nightly-scan
 - 옵션: `--full` 전체 묶음부터 다시 설치(export에서는 지금 다시 만들기), `--no-scan` 반영 후 스캔 생략
 - 공유 폴더 기본값: Mac `~/Library/Mobile Documents/com~apple~CloudDocs/KRX_FDR`, Windows `%USERPROFILE%\iCloudDrive\KRX_FDR` (iCloud for Windows). 다른 곳을 쓰려면 `--dir` 또는 환경변수 `KRX_SHARE_DIR`.
 - 파일은 로컬에서 다 만든 뒤 옮기므로, 쓰다 만 파일이 동기화되지 않습니다.
+- iCloud for Windows가 동기화 충돌로 전체 묶음을 `krx_full_data(1).zip`처럼 이름을 바꿔 두는 일이 있어, 받는 쪽은 정확한 이름이 없으면 가장 최근에 받은 `krx_full_data*.zip`을 씁니다.
+- Windows PC 예약 작업: 작업 스케줄러의 "KRX_FDR iCloud 데이터 가져오기"가 평일 21:30에 `import_icloud.cmd`를 실행합니다. `pull.cmd`와 같은 가져오기를 `D:\iCloud Drive\iCloudDrive\KRX_FDR` 폴더로 하고, 출력은 `.app_data/data/logs/icloud_import.log`에 남깁니다. 스캔 결과는 이 PC에만 저장합니다.

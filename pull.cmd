@@ -3,6 +3,8 @@ setlocal
 cd /d "%~dp0"
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
+REM GitHub upload of the web data bundle is done by the Mac only; skip it on this PC.
+set KRX_DATA_TOKEN=
 REM Apply the daily price files the Mac saved to iCloud Drive, then run the MA scan.
 REM The first run (or after a long gap) installs the full bundle instead.
 REM Personal records (data\tracking) are never touched. Default folder: %USERPROFILE%\iCloudDrive\KRX_FDR
