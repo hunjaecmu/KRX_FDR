@@ -8,8 +8,6 @@
 /.app_data/lite_bundle/
 /.app_data/data/index/
 /.app_data/data/lite/
-/portfolio_dashboard.html
-/portfolio_dashboard_data/
 __pycache__/
 *.csv
 *.xlsx
@@ -35,6 +33,5 @@ build/
 *.egg-info
 *.log
 
-/portfolio_dashboard_start.command
 /.app_data/backup/
 /.app_data/data/shared_import.json
