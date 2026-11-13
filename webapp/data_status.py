@@ -8,37 +8,27 @@ import pandas as pd
 from webapp import storage
 
 
-def _read_last_non_empty_line(file_path: str) -> Optional[str]:
+def _read_last_non_empty_line(file_path: str, chunk_size: int = 1024) -> Optional[str]:
+    """파일의 마지막 비어 있지 않은 줄. 끝에서부터 덩어리로 읽어 파일 수천 개도 빨리 훑는다."""
     if not os.path.isfile(file_path):
         return None
 
     with open(file_path, "rb") as fh:
         fh.seek(0, os.SEEK_END)
-        size = fh.tell()
-        if size <= 0:
-            return None
-
-        pos = size - 1
-        while pos >= 0:
+        pos = fh.tell()
+        tail = b""
+        while pos > 0:
+            step = min(chunk_size, pos)
+            pos -= step
             fh.seek(pos)
-            ch = fh.read(1)
-            if ch not in (b"\n", b"\r"):
+            tail = fh.read(step) + tail
+            stripped = tail.rstrip(b"\r\n")
+            # 앞쪽에 줄바꿈이 있으면 마지막 줄 전체를 읽은 것이다.
+            if pos == 0 or b"\n" in stripped or b"\r" in stripped:
                 break
-            pos -= 1
+        lines = [line for line in tail.splitlines() if line.strip()]
 
-        if pos < 0:
-            return None
-
-        line = bytearray()
-        while pos >= 0:
-            fh.seek(pos)
-            ch = fh.read(1)
-            if ch in (b"\n", b"\r"):
-                break
-            line.extend(ch)
-            pos -= 1
-
-    return line[::-1].decode("utf-8", errors="ignore").strip()
+    return lines[-1].decode("utf-8", errors="ignore").strip() if lines else None
 
 
 def compute_data_status(data_dir: str) -> dict:
